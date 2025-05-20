@@ -47,8 +47,29 @@ async function main() {
 
     db.on('notification', async (msg) => {
       try {
-        const evt = JSON.parse(msg.payload);          // rail_router already emits JSON
-        if (!['DONE', 'FAILED'].includes(evt.new_state)) return; // ignore other traffic
+        let payload;
+        try {
+          payload = JSON.parse(msg.payload);
+        } catch {
+          payload = msg.payload;                   // keep raw string fallback
+        }
+        console.log('🛰️  rail_event →', payload);
+
+        const evt = payload; // Use the parsed or raw payload as 'evt'
+
+        if (typeof evt !== 'object' || evt === null || !['DONE', 'FAILED'].includes(evt.new_state)) {
+            // If evt is not an object (e.g., raw string that wasn't JSON), or doesn't have new_state, skip.
+            // You might want to log this case or handle it differently.
+            if (typeof evt !== 'object' || evt === null) {
+                console.log('ℹ️ Received non-object or null payload, skipping Temporal signal:', evt);
+                return;
+            }
+            // If it's an object but doesn't have the right state, also skip.
+            if (!['DONE', 'FAILED'].includes(evt.new_state)) {
+                 console.log('ℹ️ Event state not DONE or FAILED, skipping Temporal signal:', evt.new_state);
+                 return;
+            }
+        }
 
         // feature-flag: skip forwarding when USE_DAG_RUNNER != 'true'
         if (process.env.USE_DAG_RUNNER !== 'true') return;
