@@ -5,7 +5,7 @@ import {
   Counter,
 } from 'prom-client';
 import pino from 'pino';
-import { getTemporal } from './temporalClient.js';
+import { getTemporalClient } from './temporalClient.js';
 import type { WorkflowClient } from '@temporalio/client';
 import { pool } from './pg.js';
 
@@ -172,7 +172,7 @@ async function handleNotification(msg: Notification): Promise<void> {
 
   if (!temporalClient) {
     try {
-      temporalClient = await getTemporal(); // Use the new getTemporal function
+      temporalClient = await getTemporalClient(); // Use the new getTemporalClient function
       logger.info('Temporal client initialized.');
     } catch (err) {
       logger.error({ err }, 'Failed to initialize Temporal client');
