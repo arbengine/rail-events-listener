@@ -109,18 +109,20 @@ async function handleNotification(msg: Notification): Promise<void> {
     return;
   }
   
-  if (!['DONE', 'FAILED'].includes(ev.event_type)) {
-    logger.trace({ event_type: ev.event_type, task_id: ev.task_id }, 'Ignoring event_type for rail event');
+  const status = ev.event_type ?? ev.state ?? ev.type; // accept both
+
+  if (!['DONE', 'FAILED'].includes(status)) {
+    logger.trace({ status, task_id: ev.task_id }, 'Ignoring event status for rail event');
     return;
   }
 
   if (!USE_DAG_RUNNER) {
-    logger.debug({ task_id: ev.task_id, event_type: ev.event_type }, 'DAG_RUNNER_ACTIVE is false - ignoring rail event');
+    logger.debug({ task_id: ev.task_id, status }, 'DAG_RUNNER_ACTIVE is false - ignoring rail event');
     return;
   }
 
   const wfId = `dag-${ev.task_id}-v1`;
-  logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, event_type: ev.event_type }, 'Preparing to send Temporal signal for rail event');
+  logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, status }, 'Preparing to send Temporal signal for rail event');
   try {
     const temporalClient = await getTemporalClient();
     await temporalClient.workflow.signalWithStart(wfId, {
@@ -130,7 +132,7 @@ async function handleNotification(msg: Notification): Promise<void> {
       workflowIdReusePolicy: 'AllowDuplicateFailedOnly', // A generally safer policy
       // workflowIdReusePolicy: 'ALLOW_DUPLICATE', // CTO's original example, ensure it's intended
     });
-    logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, event_type: ev.event_type }, 'Temporal signal sent successfully for rail event');
+    logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, status }, 'Temporal signal sent successfully for rail event');
   } catch (temporalError) {
     listenerErrors.inc();
     logger.error({ err: temporalError, wfId, task_id: ev.task_id, node_id: ev.node_id }, 'Temporal signalWithStart failed for rail event');
