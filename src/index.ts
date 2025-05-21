@@ -1,9 +1,10 @@
 import type { Notification } from 'pg';      // only for typings
 import retry       from 'p-retry';
 import * as prom   from 'prom-client';
-import { getTemporalClient } from '../shared/temporalClient.js'; // Path for the new shared client
+import { pino } from 'pino';
+import { getTemporalClient } from './temporalClient.js'; // Path for the new shared client
+import * as TemporalClientModule from '@temporalio/client'; // Alias the module
 import { pool }    from './pg.js';               // The updated pg wrapper
-import pino        from 'pino';
 
 export const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 prom.collectDefaultMetrics({ prefix: 'busywork_' });
@@ -123,10 +124,11 @@ async function handleNotification(msg: Notification): Promise<void> {
 
   const wfId = `dag-${ev.task_id}-v1`;
   logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, status }, 'Preparing to send Temporal signal for rail event');
+
   try {
-    const temporalClient = await getTemporalClient();
+    const temporalClient: TemporalClientModule.WorkflowClient = await getTemporalClient();
     await temporalClient.workflow.signalWithStart(wfId, {
-      taskQueue: 'dag-runner', // Ensure this task queue is correct
+      taskQueue: 'dag-runner', // Make sure this matches your Temporal Task Queue
       signal: 'nodeDone',      // Ensure this signal name is correct
       signalArgs: [ev],        // NodeDoneSignal (ensure type matches workflow definition)
       workflowIdReusePolicy: 'AllowDuplicateFailedOnly', // A generally safer policy

@@ -3,19 +3,19 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "baseUrl": ".",
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+    "outDir": "dist",
+    "rootDir": "src",
+
+    /* Strict-mode niceties */
     "strict": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "declaration": true,
-    "sourceMap": true, 
-    "experimentalDecorators": true, 
-    "emitDecoratorMetadata": true
+    "forceConsistentCasingInFileNames": true,
+
+    /* Make CJS → ESM interop sane */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    /* Speed up CI; pg’s types are safe */
+    "skipLibCheck": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src"]
 }
