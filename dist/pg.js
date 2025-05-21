@@ -10,6 +10,7 @@ const pool = new Pool({
     connectionTimeoutMillis: process.env.PG_CONNECTION_TIMEOUT_MS ? parseInt(process.env.PG_CONNECTION_TIMEOUT_MS, 10) : 2000,
 });
 pool.on('error', (err) => {
+    console.error('🐛  pg client error:', err); // Show complete error object
     pgLogger.error({ err }, 'Unexpected error on idle client in pool (pg.js)');
 });
 async function query(text, params) {

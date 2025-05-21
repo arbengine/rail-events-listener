@@ -80,6 +80,8 @@ async function bootListener() {
         // No explicit return here, the function's purpose is to set up the listener
     }
     catch (err) { // Use 'any' to access potential pg-specific error properties
+        // 🔥 give Railway something it can't collapse
+        console.error('🐞 PG connection/SET/LISTEN failed →', JSON.stringify(err, null, 2));
         logger.error({
             message: err?.message,
             stack: err?.stack,
