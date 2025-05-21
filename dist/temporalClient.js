@@ -1,18 +1,18 @@
-// workers/rail-events-listener/src/temporalClient.ts
-import { Connection, WorkflowClient, } from '@temporalio/client';
-let client;
+// src/temporalClient.js
+import { Connection, WorkflowClient } from '@temporalio/client';
+let client; // singleton instance
 /**
- * Returns a memoised WorkflowClient that other modules can share.
- * Honors standard Temporal env vars:
- *   • TEMPORAL_ADDRESS          (host:port)
- *   • TEMPORAL_NAMESPACE        (defaults to 'default')
- *   • TEMPORAL_MTLS_ENABLED     etc. (SDK v3 picks these up)
+ * Returns a singleton Temporal WorkflowClient.
+ * Honors standard Temporal env vars for connection options.
  */
-export async function getTemporalClient(opts = {}) {
+export async function getTemporal(opts = {}) {
     if (client)
         return client;
-    // Will read TLS / mTLS env automatically
+    // Connection.connect() will automatically pick up env vars like
+    // TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_MTLS_CERT etc.
     const connection = await Connection.connect();
     client = new WorkflowClient({ connection, ...opts });
     return client;
 }
+// Alias for callers that might still use the old name
+export { getTemporal as getTemporalClient };

@@ -6,6 +6,9 @@
     "outDir": "dist",
     "rootDir": "src",
 
+    /* JavaScript support */
+    "allowJs": true, // Added to include JS files in compilation output
+
     /* Strict-mode niceties */
     "strict": true,
     "forceConsistentCasingInFileNames": true,

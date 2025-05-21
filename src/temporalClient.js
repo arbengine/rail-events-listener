@@ -1,7 +1,7 @@
 // src/temporalClient.js
 import { Connection, WorkflowClient } from '@temporalio/client';
 
-let client;
+let client; // singleton instance
 
 /**
  * Returns a singleton Temporal WorkflowClient.
@@ -12,7 +12,10 @@ export async function getTemporal(opts = {}) {
 
   // Connection.connect() will automatically pick up env vars like
   // TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_MTLS_CERT etc.
-  const connection = await Connection.connect(); 
-  client = new WorkflowClient({ connection, ...opts }); 
+  const connection = await Connection.connect();
+  client = new WorkflowClient({ connection, ...opts });
   return client;
 }
+
+// Alias for callers that might still use the old name
+export { getTemporal as getTemporalClient };
