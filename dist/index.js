@@ -1,0 +1,122 @@
+import retry from 'p-retry';
+import * as prom from 'prom-client';
+import { pino } from 'pino';
+import { getTemporalClient } from './temporalClient.js'; // Path for the new shared client
+import { pool } from './pg.js'; // The updated pg wrapper
+export const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+prom.collectDefaultMetrics({ prefix: 'busywork_' });
+const pgw = new prom.Pushgateway(process.env.PUSHGATEWAY_URL);
+setInterval(() => pgw.pushAdd({
+    jobName: 'rail-events-listener',
+    groupings: { instance: process.env.HOSTNAME ?? 'unknown' },
+}), 30_000);
+const listenerErrors = new prom.Counter({
+    name: 'busywork_listener_errors_total',
+    help: 'Unhandled errors in rail-events-listener',
+});
+const USE_DAG_RUNNER = process.env.DAG_RUNNER_ACTIVE === 'true';
+const CHANNEL = 'rail_events';
+/** Boot a dedicated, long-lived LISTEN socket. */
+async function bootListener() {
+    logger.info('Attempting to connect to PostgreSQL for LISTEN...');
+    const client = await pool.connect();
+    logger.info('Successfully connected client from shared pool for LISTEN.');
+    // Crucially, disable server-side timeouts on THIS SPECIFIC socket from the shared pool
+    logger.debug('Setting session timeouts for LISTEN client...');
+    await client.query(`
+    SET statement_timeout TO 0;
+    SET idle_in_transaction_session_timeout TO 0;
+    SET client_min_messages TO WARNING; -- Reduce verbosity of some logs
+  `);
+    logger.debug('Session timeouts set.');
+    client.on('error', (err) => {
+        listenerErrors.inc();
+        logger.error(err, 'PostgreSQL client error on LISTEN connection (will attempt to reconnect if connection ends)');
+        // The 'pg' library typically handles client removal from pool on 'error' or 'end'.
+        // If an error occurs that doesn't end the connection but makes it unusable,
+        // explicit client.release(err) might be needed, but rely on p-retry for now.
+    });
+    client.on('notification', (msg) => handleNotification(msg).catch(err => {
+        logger.error({ err, msgPayload: msg.payload }, 'Error in handleNotification');
+        listenerErrors.inc(); // Ensure errors in notification handling are counted
+    }));
+    await client.query(`LISTEN ${CHANNEL}`);
+    logger.info(`LISTENING on PostgreSQL channel: ${CHANNEL}`);
+    /** Reconnect logic if connection ends */
+    client.on('end', () => {
+        logger.warn('PostgreSQL client LISTEN connection ended. Initiating reconnection sequence.');
+        // client.release(); // Client is auto-removed from pool on 'end' if it was in use.
+        retry(bootListener, {
+            retries: process.env.LISTENER_RECONNECT_RETRIES ? parseInt(process.env.LISTENER_RECONNECT_RETRIES, 10) : 10, // More retries for a listener
+            minTimeout: 1_000,
+            maxTimeout: 45_000, // Slightly longer max timeout
+            factor: 2.5, // Steeper backoff
+            onFailedAttempt: error => {
+                logger.warn({ attemptNumber: error.attemptNumber, retriesLeft: error.retriesLeft, error: error.message }, 'Listener reconnect attempt failed. Retrying...');
+            },
+        }).catch(finalError => {
+            logger.fatal(finalError, 'All listener reconnection attempts failed. The rail-events-listener will now exit.');
+            process.exit(1); // Exit if all retries are exhausted
+        });
+    });
+}
+/** Process NOTIFY payloads one by one */
+async function handleNotification(msg) {
+    if (msg.channel !== CHANNEL) {
+        logger.warn({ actual: msg.channel, expected: CHANNEL }, 'Notification received on unexpected channel');
+        return;
+    }
+    let ev;
+    try {
+        if (msg.payload == null || msg.payload.trim() === '') {
+            logger.warn('Received empty notification payload - skipping');
+            return;
+        }
+        ev = JSON.parse(msg.payload);
+    }
+    catch (parseError) {
+        logger.warn({ payload: msg.payload, error: parseError }, 'Malformed JSON notification payload - skipping');
+        listenerErrors.inc(); // Count malformed payloads as an error type
+        return;
+    }
+    // Basic validation for expected event structure
+    if (typeof ev !== 'object' || ev === null || typeof ev.event_type !== 'string' || typeof ev.task_id !== 'string') {
+        logger.warn({ eventReceived: ev }, 'Malformed or incomplete event structure in notification - skipping');
+        listenerErrors.inc(); // Count malformed structure as an error type
+        return;
+    }
+    const status = ev.event_type ?? ev.state ?? ev.type; // accept both
+    if (!['DONE', 'FAILED'].includes(status)) {
+        logger.trace({ status, task_id: ev.task_id }, 'Ignoring event status for rail event');
+        return;
+    }
+    if (!USE_DAG_RUNNER) {
+        logger.debug({ task_id: ev.task_id, status }, 'DAG_RUNNER_ACTIVE is false - ignoring rail event');
+        return;
+    }
+    const wfId = `dag-${ev.task_id}-v1`;
+    logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, status }, 'Preparing to send Temporal signal for rail event');
+    try {
+        const temporalClient = await getTemporalClient();
+        await temporalClient.signalWithStart(wfId, {
+            taskQueue: 'dag-runner', // Make sure this matches your Temporal Task Queue
+            signal: 'nodeDone', // Ensure this signal name is correct
+            signalArgs: [ev], // NodeDoneSignal (ensure type matches workflow definition)
+            workflowId: wfId,
+            workflowIdReusePolicy: 'ALLOW_DUPLICATE_FAILED_ONLY', // Corrected casing
+        });
+        logger.info({ wfId, task_id: ev.task_id }, 'Successfully signaled workflow with start');
+    }
+    catch (temporalError) {
+        listenerErrors.inc();
+        logger.error({ err: temporalError, wfId, task_id: ev.task_id, node_id: ev.node_id }, 'Temporal signalWithStart failed for rail event');
+        // Consider if specific error types from Temporal need different handling or retries here.
+    }
+}
+// Initial boot attempt
+logger.info('Starting rail-events-listener...');
+bootListener().catch(initialBootError => {
+    listenerErrors.inc();
+    logger.fatal(initialBootError, 'Failed to boot rail-events-listener on initial attempt. Exiting.');
+    process.exit(1);
+});
