@@ -1,7 +1,7 @@
 import retry from 'p-retry';
 import { collectDefaultMetrics, Counter, } from 'prom-client';
 import pino from 'pino';
-import { getTemporal } from './temporalClient.js';
+import { getTemporalClient } from './temporalClient.js';
 import { pool } from './pg.js';
 const pinoInstance = pino; // Cast to any to bypass type checking for this line
 export const logger = pinoInstance({ level: process.env.LOG_LEVEL || 'info' });
@@ -32,7 +32,7 @@ const notificationsProcessed = new Counter({
 });
 let temporalClient;
 /** Boot a dedicated, long-lived LISTEN socket. */
-async function bootListener() {
+export async function bootListener() {
     logger.info('Attempting to connect to PostgreSQL for LISTEN...');
     let listenerClient;
     try {
@@ -137,7 +137,7 @@ async function handleNotification(msg) {
     logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, status }, 'Preparing to send Temporal signal for rail event');
     if (!temporalClient) {
         try {
-            temporalClient = await getTemporal(); // Use the new getTemporal function
+            temporalClient = await getTemporalClient(); // Use the new getTemporalClient function
             logger.info('Temporal client initialized.');
         }
         catch (err) {

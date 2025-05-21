@@ -46,7 +46,7 @@ const notificationsProcessed = new Counter({
 let temporalClient: WorkflowClient | undefined;
 
 /** Boot a dedicated, long-lived LISTEN socket. */
-async function bootListener(): Promise<void> {
+export async function bootListener(): Promise<void> {
   logger.info('Attempting to connect to PostgreSQL for LISTEN...');
   let listenerClient: PoolClient | undefined;
   try {
