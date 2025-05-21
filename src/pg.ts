@@ -9,7 +9,7 @@ import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 
 import 'dotenv/config';
-import { Pool } from 'pg';
+import { Pool, QueryResultRow, QueryResult } from 'pg';
 
 /* ─────────────── ENV-driven tunables (with fallbacks) ─────────────── */
 const n = (raw: string | undefined, def: number): number => {
@@ -61,7 +61,7 @@ async function closePool(): Promise<void> {
 }
 
 // Type-safe query function
-async function query<T extends pg.QueryResultRow = any>(text: string, params?: any[]): Promise<pg.QueryResult<T>> {
+async function query<T extends QueryResultRow = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
   const client = await pool.connect();
   try {
     return await client.query<T>(text, params);

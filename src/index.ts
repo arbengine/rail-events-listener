@@ -14,7 +14,7 @@ import { pool, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS } from './pg.
 // const pinoInstance = pino as any; // Cast to any to bypass type checking for this line
 // export const logger = pinoInstance({ level: process.env.LOG_LEVEL || 'info' });
 // Replaced pino with console logging facade for easier search/replace, can be more refined
-const logger = {
+export const logger = {
   info: (...args: any[]) => console.log(...args),
   warn: (...args: any[]) => console.warn(...args),
   error: (...args: any[]) => console.error(...args),

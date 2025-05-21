@@ -1,44 +1,68 @@
-// src/pg.js
-import pg from 'pg'; // pg is a CJS module, default import is { Pool, Client etc. }
-const { Pool } = pg; // Destructure Pool from the default import
-import pino from 'pino';
-const pgLogger = pino({ name: 'pg-wrapper-js', level: process.env.LOG_LEVEL || 'info' });
-// Default values for new timeout settings
-const PG_STATEMENT_TIMEOUT_MS_DEFAULT = 60000; // 60s
-const PG_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS_DEFAULT = 30000; // 30s
+// Root // pg.ts -- shared Postgres helper (adapted from v1.2 example)
+// -----------------------------------------------------------------------------
+// • Singleton Pool with ENV-driven caps
+// • Per-session safety guards (literal SETs -- no bind placeholders)
+// -----------------------------------------------------------------------------
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
+import 'dotenv/config';
+import { Pool } from 'pg';
+/* ─────────────── ENV-driven tunables (with fallbacks) ─────────────── */
+const n = (raw, def) => {
+    const val = +(raw || '');
+    return Number.isFinite(val) ? val : def;
+};
+const MAX_CONN = n(process.env.PG_POOL_MAX, 10);
+const IDLE_TIMEOUT_MS = n(process.env.PG_POOL_IDLE_MS, 10_000);
+const CONN_TIMEOUT_MS = n(process.env.PG_POOL_CONN_TIMEOUT_MS, 2_000);
+const STATEMENT_TIMEOUT_MS = n(process.env.PG_STATEMENT_TIMEOUT_MS, 10_000); // Renamed from STATEMENT_TIMEOUT for clarity
+const IDLE_TX_TIMEOUT_MS = n(process.env.PG_IDLE_TX_TIMEOUT_MS, 30_000); // Renamed from IDLE_TX_TIMEOUT for clarity
+/* ───────────── create a singleton pool (reused everywhere) ────────── */
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    max: process.env.PG_MAX_POOL_SIZE ? parseInt(process.env.PG_MAX_POOL_SIZE, 10) : 10,
-    idleTimeoutMillis: process.env.PG_IDLE_TIMEOUT_MS ? parseInt(process.env.PG_IDLE_TIMEOUT_MS, 10) : 30000,
-    connectionTimeoutMillis: process.env.PG_CONNECTION_TIMEOUT_MS ? parseInt(process.env.PG_CONNECTION_TIMEOUT_MS, 10) : 2000,
-    // Add stricter timeout configurations
-    statement_timeout: process.env.PG_STATEMENT_TIMEOUT_MS
-        ? parseInt(process.env.PG_STATEMENT_TIMEOUT_MS, 10)
-        : PG_STATEMENT_TIMEOUT_MS_DEFAULT,
-    idle_in_transaction_session_timeout: process.env.PG_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS
-        ? parseInt(process.env.PG_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS, 10)
-        : PG_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS_DEFAULT,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined, // Typical for Railway/Heroku
+    max: MAX_CONN,
+    idleTimeoutMillis: IDLE_TIMEOUT_MS,
+    connectionTimeoutMillis: CONN_TIMEOUT_MS,
+});
+/* ─────────── per-session safety settings (runs on connect) ─────────── */
+pool.on('connect', async (client) => {
+    try {
+        // Parameter placeholders are not allowed in SET commands; embed literals directly.
+        await client.query(`SET statement_timeout TO ${STATEMENT_TIMEOUT_MS}`);
+        await client.query(`SET idle_in_transaction_session_timeout TO ${IDLE_TX_TIMEOUT_MS}`);
+    }
+    catch (err) {
+        console.error('⚠️ failed to apply session settings to PG client', err);
+        // Optionally, you might want to release the client if critical settings fail
+        // client.release(err); // This would prevent this client from being used
+    }
 });
 pool.on('error', (err) => {
-    // Replaced console.error with pgLogger.error for consistent logging
-    pgLogger.error({ err, message: err.message }, 'Unexpected error on idle client in pool (pg.js)');
+    console.error('⚠️ Unexpected error on idle client in PG pool', err);
 });
+/* Optional helper: graceful shutdown (for serverless exit hooks) */
+async function closePool() {
+    try {
+        await pool.end();
+        console.log('PostgreSQL pool has been closed.');
+    }
+    catch (err) {
+        console.error('⚠️ Error closing PostgreSQL pool', err);
+        // throw err; // Re-throw if you want to signal a failed shutdown
+    }
+}
+// Type-safe query function
 async function query(text, params) {
-    const start = Date.now();
     const client = await pool.connect();
     try {
-        const res = await client.query(text, params);
-        const duration = Date.now() - start;
-        pgLogger.trace({ query: text, duration, rows: res.rowCount }, 'Executed query (pg.js)');
-        return res;
+        return await client.query(text, params);
     }
     finally {
         client.release();
     }
 }
-async function closePool() {
-    pgLogger.info('Closing database connection pool (pg.js)...');
-    await pool.end();
-    pgLogger.info('Database connection pool closed (pg.js).');
-}
-export { pool, query, closePool };
+export { query, pool, // Exporting the pool directly if other parts of the app need to get a client manually
+closePool, 
+// Exporting timeouts for reference or use elsewhere if needed
+STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS };
