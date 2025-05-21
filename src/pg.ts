@@ -26,7 +26,10 @@ const IDLE_TX_TIMEOUT_MS = n(process.env.PG_IDLE_TX_TIMEOUT_MS, 30_000); // Rena
 /* ───────────── create a singleton pool (reused everywhere) ────────── */
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined, // Typical for Railway/Heroku
+  // Allow self-signed SSL certificates. The pg library will use SSL if the
+  // server requires it or if the connectionString includes ssl=true or similar flags.
+  // This setting is crucial for environments using self-signed certs (e.g., development, some cloud providers).
+  ssl: { rejectUnauthorized: false }, 
   max: MAX_CONN,
   idleTimeoutMillis: IDLE_TIMEOUT_MS,
   connectionTimeoutMillis: CONN_TIMEOUT_MS,

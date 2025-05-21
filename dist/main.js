@@ -3,24 +3,44 @@ import pino from 'pino';
 import { bootListener } from './index.js'; // Assuming .js for compiled output
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js'; // Assuming .js
 import { closePool } from './pg.js'; // pg.js is already JavaScript
+import retry from 'p-retry'; // Import p-retry
 const mainLogger = pino({ name: 'main-ts', level: process.env.LOG_LEVEL || 'info' });
 async function main() {
     mainLogger.info('🚀 Starting application...');
     try {
-        // Initialize the PostgreSQL listener
-        // bootListener itself has retry logic and will throw if it ultimately fails
-        await bootListener();
+        // Initialize the PostgreSQL listener with retry logic for initial boot
+        mainLogger.info('Attempting initial boot of PostgreSQL listener...');
+        await retry(bootListener, {
+            retries: process.env.INITIAL_BOOT_RETRIES ? parseInt(process.env.INITIAL_BOOT_RETRIES, 10) : 5,
+            minTimeout: process.env.INITIAL_BOOT_MIN_TIMEOUT_MS ? parseInt(process.env.INITIAL_BOOT_MIN_TIMEOUT_MS, 10) : 1000,
+            maxTimeout: process.env.INITIAL_BOOT_MAX_TIMEOUT_MS ? parseInt(process.env.INITIAL_BOOT_MAX_TIMEOUT_MS, 10) : 30000,
+            factor: 2.5,
+            onFailedAttempt: error => {
+                mainLogger.warn({
+                    attemptNumber: error.attemptNumber,
+                    retriesLeft: error.retriesLeft,
+                    message: error.message,
+                    code: error?.code,
+                }, 'Initial listener boot attempt failed. Retrying...');
+            },
+        });
         mainLogger.info('✅ PostgreSQL listener booted successfully.');
         // Optionally, pre-warm the Temporal client connection
         // getTemporalClient also has internal error handling and will throw if connection fails
+        mainLogger.info('Initializing Temporal client...');
         await getTemporalClient();
         mainLogger.info('✅ Temporal client initialized (or confirmed ready).');
         mainLogger.info('🎉 Application started successfully and is listening for events.');
     }
     catch (err) {
-        mainLogger.fatal({ err, message: err.message, stack: err.stack }, '💥 Failed to start application');
+        mainLogger.fatal({
+            err,
+            message: err.message,
+            stack: err.stack,
+            originalError: err.originalError // p-retry wraps the original error
+        }, '💥 Failed to start application after multiple retries');
         // Attempt graceful shutdown of any partially initialized components before exiting
-        await shutdown(new Error('Application startup failed'));
+        await shutdown(err.originalError || err);
         process.exit(1);
     }
 }

@@ -211,20 +211,6 @@ async function shutdownGracefully(signal) {
     // Any other cleanup
     logger.info('Graceful shutdown complete.');
 }
-// Initial boot attempt
-logger.info('Starting rail-events-listener...');
-retry(bootListener, {
-    retries: 5, // Initial boot retries
-    minTimeout: 1000,
-    maxTimeout: 30000,
-    onFailedAttempt: error => {
-        logger.warn({ attemptNumber: error.attemptNumber, retriesLeft: error.retriesLeft, error: error.message }, 'Initial boot attempt failed. Retrying...');
-    },
-}).catch(initialBootError => {
-    listenerErrors.inc();
-    logger.fatal(initialBootError, 'All initial boot attempts failed. The rail-events-listener will now exit.');
-    shutdownGracefully('INITIAL_BOOT_FAILURE').then(() => process.exit(1));
-});
 process.on('SIGINT', async () => {
     await shutdownGracefully('SIGINT');
     process.exit(0);
