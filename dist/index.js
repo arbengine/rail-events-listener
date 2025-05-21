@@ -19,46 +19,68 @@ const CHANNEL = 'rail_events';
 /** Boot a dedicated, long-lived LISTEN socket. */
 async function bootListener() {
     logger.info('Attempting to connect to PostgreSQL for LISTEN...');
-    const client = await pool.connect();
-    logger.info('Successfully connected client from shared pool for LISTEN.');
-    // Crucially, disable server-side timeouts on THIS SPECIFIC socket from the shared pool
-    logger.debug('Setting session timeouts for LISTEN client...');
-    await client.query(`
-    SET statement_timeout TO 0;
-    SET idle_in_transaction_session_timeout TO 0;
-    SET client_min_messages TO WARNING; -- Reduce verbosity of some logs
-  `);
-    logger.debug('Session timeouts set.');
-    client.on('error', (err) => {
-        listenerErrors.inc();
-        logger.error(err, 'PostgreSQL client error on LISTEN connection (will attempt to reconnect if connection ends)');
-        // The 'pg' library typically handles client removal from pool on 'error' or 'end'.
-        // If an error occurs that doesn't end the connection but makes it unusable,
-        // explicit client.release(err) might be needed, but rely on p-retry for now.
-    });
-    client.on('notification', (msg) => handleNotification(msg).catch(err => {
-        logger.error({ err, msgPayload: msg.payload }, 'Error in handleNotification');
-        listenerErrors.inc(); // Ensure errors in notification handling are counted
-    }));
-    await client.query(`LISTEN ${CHANNEL}`);
-    logger.info(`LISTENING on PostgreSQL channel: ${CHANNEL}`);
-    /** Reconnect logic if connection ends */
-    client.on('end', () => {
-        logger.warn('PostgreSQL client LISTEN connection ended. Initiating reconnection sequence.');
-        // client.release(); // Client is auto-removed from pool on 'end' if it was in use.
-        retry(bootListener, {
-            retries: process.env.LISTENER_RECONNECT_RETRIES ? parseInt(process.env.LISTENER_RECONNECT_RETRIES, 10) : 10, // More retries for a listener
-            minTimeout: 1_000,
-            maxTimeout: 45_000, // Slightly longer max timeout
-            factor: 2.5, // Steeper backoff
-            onFailedAttempt: error => {
-                logger.warn({ attemptNumber: error.attemptNumber, retriesLeft: error.retriesLeft, error: error.message }, 'Listener reconnect attempt failed. Retrying...');
-            },
-        }).catch(finalError => {
-            logger.fatal(finalError, 'All listener reconnection attempts failed. The rail-events-listener will now exit.');
-            process.exit(1); // Exit if all retries are exhausted
+    let listenerClient;
+    try {
+        const client = await pool.connect();
+        logger.info('Successfully connected client from shared pool for LISTEN.');
+        listenerClient = client; // Store the successfully connected client
+        // Crucially, disable server-side timeouts on THIS SPECIFIC socket from the shared pool
+        logger.debug('Setting session timeouts for LISTEN client...');
+        await client.query(`
+      SET statement_timeout TO 0;
+      SET idle_in_transaction_session_timeout TO 0;
+      SET client_min_messages TO WARNING; -- Reduce verbosity of some logs
+    `);
+        logger.debug('Session timeouts set.');
+        client.on('error', (err) => {
+            listenerErrors.inc();
+            logger.error(err, 'PostgreSQL client error on LISTEN connection (will attempt to reconnect if connection ends)');
+            // The 'pg' library typically handles client removal from pool on 'error' or 'end'.
+            // If an error occurs that doesn't end the connection but makes it unusable,
+            // explicit client.release(err) might be needed, but rely on p-retry for now.
         });
-    });
+        client.on('notification', (msg) => handleNotification(msg).catch(err => {
+            logger.error({ err, msgPayload: msg.payload }, 'Error in handleNotification');
+            listenerErrors.inc(); // Ensure errors in notification handling are counted
+        }));
+        await client.query(`LISTEN ${CHANNEL}`);
+        logger.info(`LISTENING on PostgreSQL channel: ${CHANNEL}`);
+        /** Reconnect logic if connection ends */
+        client.on('end', () => {
+            logger.warn('PostgreSQL client LISTEN connection ended. Initiating reconnection sequence.');
+            // client.release(); // Client is auto-removed from pool on 'end' if it was in use.
+            retry(bootListener, {
+                retries: process.env.LISTENER_RECONNECT_RETRIES ? parseInt(process.env.LISTENER_RECONNECT_RETRIES, 10) : 10, // More retries for a listener
+                minTimeout: 1_000,
+                maxTimeout: 45_000, // Slightly longer max timeout
+                factor: 2.5, // Steeper backoff
+                onFailedAttempt: error => {
+                    logger.warn({ attemptNumber: error.attemptNumber, retriesLeft: error.retriesLeft, error: error.message }, 'Listener reconnect attempt failed. Retrying...');
+                },
+            }).catch(finalError => {
+                logger.fatal(finalError, 'All listener reconnection attempts failed. The rail-events-listener will now exit.');
+                process.exit(1); // Exit if all retries are exhausted
+            });
+        });
+        // No explicit return here, the function's purpose is to set up the listener
+    }
+    catch (err) { // Use 'any' to access potential pg-specific error properties
+        logger.error({
+            message: err?.message,
+            stack: err?.stack,
+            code: err?.code, // e.g., ECONNREFUSED, ENOTFOUND (from pg)
+            errno: err?.errno,
+            syscall: err?.syscall,
+            address: err?.address,
+            port: err?.port,
+            fullError: err // Log the full error object for detailed inspection
+        }, 'Failed to connect or setup LISTEN client');
+        if (listenerClient) {
+            // Release the client back to the pool, marking it as errored so it's discarded
+            listenerClient.release(true);
+        }
+        throw err; // Rethrow to be handled by p-retry
+    }
 }
 /** Process NOTIFY payloads one by one */
 async function handleNotification(msg) {
