@@ -13,6 +13,7 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => {
+  console.error('🐛  pg client error:', err);  // Show complete error object
   pgLogger.error({ err }, 'Unexpected error on idle client in pool (pg.js)');
 });
 
