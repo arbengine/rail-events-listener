@@ -1,4 +1,5 @@
 // src/main.ts
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // DANGER: Allow self-signed certs globally (dev only!)
 import pino from 'pino';
 import { bootListener } from './index.js'; // Assuming .js for compiled output
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js'; // Assuming .js
