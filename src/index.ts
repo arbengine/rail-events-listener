@@ -127,14 +127,14 @@ async function handleNotification(msg: Notification): Promise<void> {
 
   try {
     const temporalClient: TemporalClientModule.WorkflowClient = await getTemporalClient();
-    await temporalClient.workflow.signalWithStart(wfId, {
+    await temporalClient.signalWithStart(wfId, {
       taskQueue: 'dag-runner', // Make sure this matches your Temporal Task Queue
       signal: 'nodeDone',      // Ensure this signal name is correct
       signalArgs: [ev],        // NodeDoneSignal (ensure type matches workflow definition)
-      workflowIdReusePolicy: 'AllowDuplicateFailedOnly', // A generally safer policy
-      // workflowIdReusePolicy: 'ALLOW_DUPLICATE', // CTO's original example, ensure it's intended
+      workflowId: wfId,
+      workflowIdReusePolicy: 'ALLOW_DUPLICATE_FAILED_ONLY', // Corrected casing
     });
-    logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, status }, 'Temporal signal sent successfully for rail event');
+    logger.info({ wfId, task_id: ev.task_id }, 'Successfully signaled workflow with start');
   } catch (temporalError) {
     listenerErrors.inc();
     logger.error({ err: temporalError, wfId, task_id: ev.task_id, node_id: ev.node_id }, 'Temporal signalWithStart failed for rail event');

@@ -7,7 +7,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@temporalio/client": "1.11.8",
+    "@temporalio/client": "^1.11.8",
     "p-retry": "^6.2.0",
     "pg": "^8.16.0",
     "pino": "^8",
