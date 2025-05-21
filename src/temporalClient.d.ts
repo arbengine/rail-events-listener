@@ -1,7 +1,7 @@
 // src/temporalClient.d.ts
-import type { WorkflowClient, WorkflowClientOptions } from '@temporalio/client';
+import type { WorkflowClient } from '@temporalio/client';
 
-declare module './temporalClient.js' {
-  export function getTemporal(opts?: WorkflowClientOptions): Promise<WorkflowClient>;
-  export { getTemporal as getTemporalClient }; 
+declare module './temporalClient.js' { 
+  export function getTemporalClient(): Promise<WorkflowClient>;
+  export function closeTemporalClient(): Promise<void>;
 }

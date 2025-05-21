@@ -1,11 +1,6 @@
 // workers/rail-events-listener/src/temporalClient.ts
 import { Connection, WorkflowClient } from '@temporalio/client';
 import 'dotenv/config';
-import pino from 'pino';
-
-// Initialize pino logger for this module, using 'as any' to align with index.ts and bypass call signature issues
-const pinoInstance = pino as any; 
-const temporalLogger = pinoInstance({ name: 'temporal-client-ts', level: process.env.LOG_LEVEL || 'info' });
 
 let workflowClientInstance: WorkflowClient | undefined;
 
@@ -16,51 +11,52 @@ export async function getTemporalClient(): Promise<WorkflowClient> {
   if (workflowClientInstance) return workflowClientInstance;
 
   // 1. Validate env
-  const required = ['TEMPORAL_ADDRESS', 'TEMPORAL_NAMESPACE', 'TEMPORAL_API_KEY'];
-  const missing = required.filter(v => !process.env[v]);
-  if (missing.length) {
-    const errorMsg = `Missing Temporal env vars: ${missing.join(', ')}`;
-    temporalLogger.error(errorMsg);
+  const requiredVars = ['TEMPORAL_ADDRESS', 'TEMPORAL_NAMESPACE', 'TEMPORAL_API_KEY'];
+  const missingVars = requiredVars.filter(v => !process.env[v]);
+  if (missingVars.length > 0) {
+    const errorMsg = `Missing required environment variables: ${missingVars.join(', ')}`;
+    console.error(errorMsg);
     throw new Error(errorMsg);
   }
 
   const { TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_API_KEY } = process.env;
-  temporalLogger.info(`🔄 Connecting to Temporal at ${TEMPORAL_ADDRESS} (ns: ${TEMPORAL_NAMESPACE})`);
+  console.log(`🔄 Connecting to Temporal with address: ${TEMPORAL_ADDRESS}`);
+  console.log(`🔑 API Key exists: ${Boolean(TEMPORAL_API_KEY)}, Length: ${TEMPORAL_API_KEY?.length || 0}`);
 
   // Helper to build client once we have a connection
   const makeClient = (conn: Connection) =>
-    new WorkflowClient({ connection: conn, namespace: TEMPORAL_NAMESPACE });
+    new WorkflowClient({ connection: conn, namespace: TEMPORAL_NAMESPACE! });
 
   let connection: Connection | undefined;
 
   // 2. Try apiKey-based auth
   try {
-    temporalLogger.info('⏳ Attempting Connection.connect({ apiKey })...');
+    console.log('Attempting connection with apiKey parameter...');
     connection = await Connection.connect({
-      address: TEMPORAL_ADDRESS,
-      tls: {},                 // pick up any mTLS env too
-      apiKey: TEMPORAL_API_KEY,
+      address: TEMPORAL_ADDRESS!,
+      tls: {}, 
+      apiKey: TEMPORAL_API_KEY!,
     });
-    temporalLogger.info('✅ Connected to Temporal via apiKey');
+    console.log('Connection successful with apiKey parameter');
     workflowClientInstance = makeClient(connection);
     return workflowClientInstance;
   } catch (err: any) {
-    temporalLogger.warn({ err, message: err.message }, '⚠️ apiKey auth failed for Temporal');
+    console.error('Connection failed with apiKey parameter:', err.message);
   }
 
   // 3. Fallback to metadata bearer token
-  temporalLogger.info('⏳ Attempting Connection.connect({ metadata auth })...');
+  console.log('Attempting connection with explicit authorization metadata...');
   try {
     connection = await Connection.connect({
-      address: TEMPORAL_ADDRESS,
+      address: TEMPORAL_ADDRESS!,
       tls: {},
       metadata: { authorization: `Bearer ${TEMPORAL_API_KEY}` },
     });
-    temporalLogger.info('✅ Connected to Temporal via metadata bearer');
+    console.log('Connection successful with metadata approach');
     workflowClientInstance = makeClient(connection);
     return workflowClientInstance;
   } catch (err: any) {
-    temporalLogger.error({ err, message: err.message }, '⚠️ Metadata bearer auth failed for Temporal. All connection attempts failed.');
+    console.error('Connection failed with metadata approach. All connection attempts failed:', err.message);
     throw err;
   }
 }
@@ -70,16 +66,16 @@ export async function getTemporalClient(): Promise<WorkflowClient> {
  */
 export async function closeTemporalClient(): Promise<void> {
   if (workflowClientInstance && workflowClientInstance.connection) {
-    temporalLogger.info('⏳ Closing Temporal client connection...');
+    console.log('⏳ Closing Temporal client connection...');
     try {
       await workflowClientInstance.connection.close();
-      temporalLogger.info('✅ Temporal client connection closed.');
+      console.log('✅ Temporal client connection closed.');
     } catch (err: any) {
-      temporalLogger.error({ err, message: err.message }, '⚠️ Error closing Temporal client connection.');
+      console.error('⚠️ Error closing Temporal client connection:', err.message);
     } finally {
       workflowClientInstance = undefined;
     }
   } else {
-    temporalLogger.info('ℹ️ No active Temporal client/connection to close.');
+    console.log('ℹ️ No active Temporal client/connection to close.');
   }
 }
