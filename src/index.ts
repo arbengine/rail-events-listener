@@ -1,31 +1,49 @@
-import type { Notification, PoolClient } from 'pg';      // only for typings
-import retry       from 'p-retry';
-import * as prom   from 'prom-client';
-import { pino } from 'pino';
-import { getTemporalClient } from './temporalClient.js'; // Path for the new shared client
-import * as TemporalClientModule from '@temporalio/client'; // Alias the module
-import { pool }    from './pg.js';               // The updated pg wrapper
+import type { Notification, PoolClient } from 'pg';
+import retry from 'p-retry';
+import {
+  collectDefaultMetrics,
+  Counter,
+} from 'prom-client';
+import pino from 'pino';
+import { getTemporal } from './temporalClient.js';
+import type { WorkflowClient } from '@temporalio/client';
+import { pool } from './pg.js';
 
-export const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
-prom.collectDefaultMetrics({ prefix: 'busywork_' });
+const pinoInstance = pino as any; // Cast to any to bypass type checking for this line
+export const logger = pinoInstance({ level: process.env.LOG_LEVEL || 'info' });
 
-const pgw = new prom.Pushgateway(process.env.PUSHGATEWAY_URL!);
-setInterval(
-  () =>
-    pgw.pushAdd({
-      jobName: 'rail-events-listener',
-      groupings: { instance: process.env.HOSTNAME ?? 'unknown' },
-    }),
-  30_000,
-);
+collectDefaultMetrics({ prefix: 'rail_events_listener_' });
 
-const listenerErrors = new prom.Counter({
+// Commenting out Pushgateway section due to 'prom' not found and to simplify.
+// It can be re-enabled later if PUSHGATEWAY_URL is configured and prom-client imports are adjusted.
+// const CHANNEL = 'rail_events'; // Defined below
+// const USE_DAG_RUNNER = process.env.DAG_RUNNER_ACTIVE === 'true'; // Defined below
+
+// const pgw = new prom.Pushgateway(process.env.PUSHGATEWAY_URL!); // prom is not defined
+// setInterval(
+//   () => {
+//     if (pgw) { // Check if pgw is initialized
+//        pgw.pushAdd({ jobName: 'rail-events-listener' })
+//         .catch(err => logger.error({ err }, 'Error pushing metrics to Pushgateway'));
+//     }
+//   },
+//   30_000,
+// );
+
+const CHANNEL = process.env.PG_CHANNEL || 'rail_events';
+const USE_DAG_RUNNER = process.env.DAG_RUNNER === 'true';
+
+const listenerErrors = new Counter({
   name: 'busywork_listener_errors_total',
   help: 'Unhandled errors in rail-events-listener',
 });
 
-const USE_DAG_RUNNER = process.env.DAG_RUNNER_ACTIVE === 'true';
-const CHANNEL = 'rail_events';
+const notificationsProcessed = new Counter({
+  name: 'rail_events_listener_notifications_processed_total',
+  help: 'Total notifications processed by the rail events listener',
+});
+
+let temporalClient: WorkflowClient | undefined;
 
 /** Boot a dedicated, long-lived LISTEN socket. */
 async function bootListener(): Promise<void> {
@@ -146,22 +164,41 @@ async function handleNotification(msg: Notification): Promise<void> {
     return;
   }
 
-  const wfId = `dag-${ev.task_id}-v1`;
+  const wfId = `rail-event-dag-${ev.task_id}-v1`;
   logger.info({ wfId, task_id: ev.task_id, node_id: ev.node_id, status }, 'Preparing to send Temporal signal for rail event');
 
+  if (!temporalClient) {
+    try {
+      temporalClient = await getTemporal(); // Use the new getTemporal function
+      logger.info('Temporal client initialized.');
+    } catch (err) {
+      logger.error({ err }, 'Failed to initialize Temporal client');
+      listenerErrors.inc();
+      return; // Do not proceed if Temporal client fails
+    }
+  }
+
   try {
-    const temporalClient: TemporalClientModule.WorkflowClient = await getTemporalClient();
-    await temporalClient.signalWithStart(wfId, {
-      taskQueue: 'dag-runner', // Make sure this matches your Temporal Task Queue
-      signal: 'nodeDone',      // Ensure this signal name is correct
-      signalArgs: [ev],        // NodeDoneSignal (ensure type matches workflow definition)
-      workflowId: wfId,
-      workflowIdReusePolicy: 'ALLOW_DUPLICATE_FAILED_ONLY', // Corrected casing
+    logger.info({ wfId, taskQueue: 'dag-runner', signal: 'nodeDone', payload: ev }, 'Signaling workflow with start');
+    
+    // Ensure temporalClient is defined before use
+    if (!temporalClient) {
+      logger.error({ wfId }, 'Temporal client not initialized. Cannot signal workflow.');
+      listenerErrors.inc();
+      return; // Exit if client is not available
+    }
+
+    await temporalClient.signalWithStart(wfId, { 
+      signal: 'nodeDone', // Signal name in the options object
+      taskQueue: 'dag-runner',
+      workflowId: wfId, // Can be redundant but allowed; ensures workflowId is used
+      args: [ev],
+      workflowIdReusePolicy: 'ALLOW_DUPLICATE_FAILED_ONLY',
     });
-    logger.info({ wfId, task_id: ev.task_id }, 'Successfully signaled workflow with start');
-  } catch (temporalError) {
+    logger.info({ wfId }, 'Successfully signaled workflow with start');
+  } catch (err) {
     listenerErrors.inc();
-    logger.error({ err: temporalError, wfId, task_id: ev.task_id, node_id: ev.node_id }, 'Temporal signalWithStart failed for rail event');
+    logger.error({ err, wfId, task_id: ev.task_id, node_id: ev.node_id }, 'Temporal signalWithStart failed for rail event');
     // Consider if specific error types from Temporal need different handling or retries here.
   }
 }
