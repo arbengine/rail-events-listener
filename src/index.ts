@@ -132,8 +132,8 @@ async function shutdownGracefully(reason?: string) {
 
   logger.info(logCtx({
     metrics: {
-      processed: notificationsProcessed.hashMap,
-      errors: listenerErrors.hashMap,
+      processed: notificationsProcessed.get(),
+      errors: listenerErrors.get(),
     }
   }), '📊 Shutdown complete with final metrics');
 }
