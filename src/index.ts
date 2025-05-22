@@ -1,4 +1,4 @@
-import 'dotenv/config'; // Ensure env vars are loaded first
+import 'dotenv/config'; // Ensure env vars are loaded first //
 import type { Notification, PoolClient } from 'pg';
 import retry from 'p-retry';
 import { collectDefaultMetrics, Counter } from 'prom-client';
