@@ -196,17 +196,14 @@ async function handleNotification(msg: Notification): Promise<void> {
       return; 
     }
 
-    await temporalClient.signalWithStart(
-      'main',                       // ← workflow **type**
-      { taskId: ev.task_id },       // ← start args for main()
-      {
-        workflowId: wfId,
-        taskQueue: 'dag-runner',
-        signal: 'nodeDone',
-        signalArgs: [ev],
-        workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY, // Using the imported enum member
-      },
-    );
+    await temporalClient.signalWithStart('main', {
+      workflowId: wfId,
+      taskQueue: 'dag-runner',
+      args: [{ taskId: ev.task_id }],      // ← start args for main()
+      signal: 'nodeDone',
+      signalArgs: [ev],
+      workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+    });
     logger.info({ wfId }, 'Successfully signaled workflow with start');
     notificationsProcessed.inc(); 
   } catch (err) {
