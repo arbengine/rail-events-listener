@@ -1,4 +1,4 @@
-// workers/rail-events-listener/src/index.ts – FULL VERSION w/ two-arg signalWithStart
+// workers/rail-events-listener/src/index.ts / – FULL VERSION w/ two-arg signalWithStart
 // -----------------------------------------------------------------------------
 import 'dotenv/config'; // Ensure env vars are loaded first
 import type { Notification, PoolClient } from 'pg';
