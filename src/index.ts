@@ -1,4 +1,4 @@
-// workers/rail-events-listener/src/index.ts – FULL VERSION (SDK v3 two‑arg signalWithStart)
+// workers/rail-events-listener/src/index.ts – FULL VERSION w/ two-arg signalWithStart
 // -----------------------------------------------------------------------------
 import 'dotenv/config'; // Ensure env vars are loaded first
 import type { Notification, PoolClient } from 'pg';
@@ -10,7 +10,7 @@ import { WorkflowIdReusePolicy } from '@temporalio/common';
 import { pool, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS } from './pg.js';
 
 // -----------------------------------------------------------------------------
-// lightweight console‑based logger (swap for pino in prod if desired)
+// lightweight console-based logger (swap for pino in prod if desired)
 export const logger = {
   info : (...a: any[]) => console.log(...a),
   warn : (...a: any[]) => console.warn(...a),
@@ -40,7 +40,7 @@ let temporalClient: WorkflowClient | undefined;
 let activeListenerClient: PoolClient | undefined; // track for graceful shutdown
 
 // -----------------------------------------------------------------------------
-/** Boot a dedicated, long‑lived LISTEN socket (retries inside p‑retry). */
+/** Boot a dedicated, long-lived LISTEN socket (retries inside p-retry). */
 export async function bootListener(): Promise<void> {
   logger.info('Attempting to connect to PostgreSQL for LISTEN…');
 
@@ -94,7 +94,7 @@ async function handleNotification(msg: Notification): Promise<void> {
   const wfId = `rail-event-dag-${ev.task_id}-v1`;
   logger.info({ wfId, node_id: ev.node_id, status }, 'Preparing to signal workflow');
 
-  // Lazy‑init Temporal client
+  // Lazy-init Temporal client
   if (!temporalClient) temporalClient = await getTemporalClient();
 
   await temporalClient.signalWithStart('main', {
