@@ -196,14 +196,22 @@ async function handleNotification(msg: Notification): Promise<void> {
       return; 
     }
 
-    await temporalClient.signalWithStart('main', {
-      workflowId: wfId,
-      taskQueue: 'dag-runner',
-      args: [{ taskId: ev.task_id }],      // ← start args for main()
-      signal: 'nodeDone',
-      signalArgs: [ev],
-      workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
-    });
+    await temporalClient.signalWithStart(
+      'main',                    // ① workflow type exported by dagRunner.workflow.ts
+      {
+        /* ---------- start-workflow section ---------- */
+        args: [{ taskId: ev.task_id }],      // <- first (and only) arg to main()
+
+        workflowId: wfId,                    // same ID every time for this task
+        taskQueue: 'dag-runner',
+
+        /* ---------- immediate signal section ---------- */
+        signal: 'nodeDone',
+        signalArgs: [ev],                    // the NodeDoneSignal payload
+
+        workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+      }
+    );
     logger.info({ wfId }, 'Successfully signaled workflow with start');
     notificationsProcessed.inc(); 
   } catch (err) {
