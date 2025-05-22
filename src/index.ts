@@ -98,12 +98,12 @@ async function handleNotification(msg: Notification): Promise<void> {
   if (!temporalClient) temporalClient = await getTemporalClient();
 
   await temporalClient.signalWithStart('main', {
-    // ----- start‑workflow -----
+    /* ----- start-workflow ----- */
     args: [{ taskId: ev.task_id }],
     workflowId: wfId,
     taskQueue: 'dag-runner',
 
-    // ----- immediate signal -----
+    /* ----- immediate signal ----- */
     signal: 'nodeDone',
     signalArgs: [ev],
 
