@@ -88,7 +88,7 @@ export async function bootListener(): Promise<void> {
     client
       .query('SELECT 1')                // light, uses the same socket
       .then(() => {
-        logger.debug(                   // ⬅️ visible line every 30 s
+        logger.info(                 // ← show in every log view
           logCtx(),
           '❤️ listener heartbeat OK',
         );
