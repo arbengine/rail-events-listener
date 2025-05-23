@@ -27,6 +27,9 @@ const pool = new Pool({
     max: MAX_CONN,
     idleTimeoutMillis: IDLE_TIMEOUT_MS,
     connectionTimeoutMillis: CONN_TIMEOUT_MS,
+    /* ---------- TCP keep-alive settings for the pool ---------- */
+    keepAlive: true, // Corrected: pg library uses 'keepAlive'
+    keepAliveInitialDelayMillis: 30_000,
 });
 /* ─────────── per-session safety settings (runs on connect) ─────────── */
 pool.on('connect', async (client) => {
