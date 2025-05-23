@@ -82,6 +82,16 @@ export async function bootListener(): Promise<void> {
 
   await client.query(`LISTEN ${CHANNEL}`);
   logger.info(logCtx({ channel: CHANNEL }), '🔔 LISTENING for events');
+
+  /* ---------- 30-second SQL heartbeat ---------- */
+  const heartbeat = setInterval(() => {
+    client.query('SELECT 1').catch((err: Error) => {
+      logger.warn({ err }, 'Heartbeat query failed – connection likely lost');
+    });
+  }, 30_000);
+
+  /* clear the interval when this client ends */
+  client.once('end', () => clearInterval(heartbeat));
 }
 
 // -----------------------------------------------------------------------------
