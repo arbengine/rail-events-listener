@@ -85,9 +85,20 @@ export async function bootListener(): Promise<void> {
 
   /* ---------- 30-second SQL heartbeat ---------- */
   const heartbeat = setInterval(() => {
-    client.query('SELECT 1').catch((err: Error) => {
-      logger.warn({ err }, 'Heartbeat query failed – connection likely lost');
-    });
+    client
+      .query('SELECT 1')                // light, uses the same socket
+      .then(() => {
+        logger.debug(                   // ⬅️ visible line every 30 s
+          logCtx(),
+          '❤️ listener heartbeat OK',
+        );
+      })
+      .catch((err: Error) => {
+        logger.warn(
+          logCtx({ err }),
+          '💔 heartbeat failed – connection likely lost',
+        );
+      });
   }, 30_000);
 
   /* clear the interval when this client ends */
