@@ -34,8 +34,8 @@ const pool = new Pool({
   idleTimeoutMillis: IDLE_TIMEOUT_MS,
   connectionTimeoutMillis: CONN_TIMEOUT_MS,
   /* ---------- TCP keep-alive settings for the pool ---------- */
-  keepalives: true, // Note: pg library uses 'keepalives' not 'keepAlive'
-  keepalivesInitialDelayMillis: 30_000,
+  keepAlive: true, // Corrected: pg library uses 'keepAlive'
+  keepAliveInitialDelayMillis: 30_000,
 });
 
 /* ─────────── per-session safety settings (runs on connect) ─────────── */
