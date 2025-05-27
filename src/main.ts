@@ -1,4 +1,4 @@
-// workers/rail-events-listener/src/main.ts – entrypoint wrapper
+// workers/rail-events-listener/src/main.ts – entrypoint wrapper/
 // ---------------------------------------------------------------------------
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // ⚠️ dev-only: trust self-signed certs
 
