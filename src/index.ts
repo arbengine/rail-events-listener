@@ -5,7 +5,7 @@ import { collectDefaultMetrics, Counter } from 'prom-client';
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js';
 import type { WorkflowClient } from '@temporalio/client';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
-import { pool, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS } from './pg.js';
+import { pool, query, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS } from './pg.js';
 import { RailEvent, toDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
 
@@ -88,21 +88,13 @@ export async function bootListener(): Promise<void> {
   logger.info(logCtx({ channel: CHANNEL }), '🔔 LISTENING for events');
 
   /* ---------- 30-second SQL heartbeat ---------- */
-  const heartbeat = setInterval(() => {
-    client
-      .query('SELECT 1')                // light, uses the same socket
-      .then(() => {
-        logger.info(                 // ← show in every log view
-          logCtx(),
-          '❤️ listener heartbeat OK',
-        );
-      })
-      .catch((err: Error) => {
-        logger.warn(
-          logCtx({ err }),
-          '💔 heartbeat failed – connection likely lost',
-        );
-      });
+  const heartbeat = setInterval(async () => {
+    try {
+      await query('SELECT 1');   // ✅ grabs a fresh pool connection
+      logger.info(logCtx(), '❤️ listener heartbeat OK');
+    } catch (err: any) {
+      logger.warn(logCtx({ err }), '💔 heartbeat failed – connection likely lost');
+    }
   }, 30_000);
 
   /* clear the interval when this client ends */
