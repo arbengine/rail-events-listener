@@ -6,6 +6,8 @@ import { getTemporalClient, closeTemporalClient } from './temporalClient.js';
 import type { WorkflowClient } from '@temporalio/client';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
 import { pool, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS } from './pg.js';
+import { RailEvent, toDelta } from './utils/delta.js';
+import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
 
 // -----------------------------------------------------------------------------
 // Lightweight console-based logger (swap for pino in prod if desired)
@@ -20,6 +22,8 @@ export const logger = {
 
 // -----------------------------------------------------------------------------
 collectDefaultMetrics({ prefix: 'rail_events_listener_' });
+
+const lastEventByNode = new Map<string, RailEvent>(); // key = taskId:nodeId
 
 const CHANNEL        = process.env.PG_CHANNEL || 'rail_events';
 const USE_DAG_RUNNER = process.env.DAG_RUNNER === 'true';
@@ -110,34 +114,57 @@ export async function bootListener(): Promise<void> {
 async function handleNotification(msg: Notification): Promise<void> {
   if (msg.channel !== CHANNEL || !msg.payload) return;
 
-  let ev: any;
-  try { ev = JSON.parse(msg.payload); } catch { return; }
-  if (typeof ev !== 'object' || ev === null) return;
-
-  const status = ev.event_type ?? ev.state ?? ev.type;
-  if (!['DONE', 'FAILED'].includes(status)) return;
-
-  if (!USE_DAG_RUNNER) {
-    logger.debug(logCtx({ task_id: ev.task_id, status }), '⏭️ DAG_RUNNER=false — skipping event');
+  let curr: RailEvent;
+  try {
+    const parsedPayload = JSON.parse(msg.payload);
+    // Basic validation for RailEvent structure
+    if (typeof parsedPayload !== 'object' || parsedPayload === null || 
+        !parsedPayload.task_id || !parsedPayload.node_id || !parsedPayload.state) {
+      logger.warn(logCtx({ payload: msg.payload }), 'Received payload does not conform to RailEvent structure');
+      return;
+    }
+    curr = parsedPayload as RailEvent;
+  } catch (e) {
+    logger.error(logCtx({ err: e, payload: msg.payload }), 'Failed to parse notification payload');
     return;
   }
 
-  const wfId = `rail-event-dag-${ev.task_id}-v1`;
-  logger.info(logCtx({ wfId, node_id: ev.node_id, status }), '📤 Preparing to signal Temporal workflow…');
+  const key = `${curr.task_id}:${curr.node_id}`;
+  const prev = lastEventByNode.get(key) ?? null;
+  const delta = toDelta(prev, curr);
+
+  broadcast(delta); // Call the imported broadcast function
+  logger.info({ deltaPayload: true, delta, taskId: curr.task_id, nodeId: curr.node_id }); // Log delta
+
+  lastEventByNode.set(key, curr); // Update last event for this node
+
+  const statusForTemporal = curr.state; // Assuming 'state' is the primary status for Temporal
+  if (!['DONE', 'FAILED'].includes(statusForTemporal)) {
+    logger.debug(logCtx({ task_id: curr.task_id, status: statusForTemporal }), 'Skipping Temporal signal for non-terminal status based on original logic');
+    return;
+  }
+
+  if (!USE_DAG_RUNNER) {
+    logger.debug(logCtx({ task_id: curr.task_id, status: statusForTemporal }), '⏭️ DAG_RUNNER=false — skipping event');
+    return;
+  }
+
+  const wfId = `rail-event-dag-${curr.task_id}-v1`;
+  logger.info(logCtx({ wfId, node_id: curr.node_id, status: statusForTemporal }), '📤 Preparing to signal Temporal workflow…');
 
   // Lazy-init Temporal client
   if (!temporalClient) temporalClient = await getTemporalClient();
 
   await temporalClient.signalWithStart('main', {
-    args: [{ taskId: ev.task_id }],
+    args: [{ taskId: curr.task_id }],
     workflowId: wfId,
     taskQueue: 'dag-runner',
     signal: 'nodeDone',
-    signalArgs: [ev],
+    signalArgs: [curr],
     workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
   });
 
-  notificationsProcessed.inc({ status, instance_id: INSTANCE_ID });
+  notificationsProcessed.inc({ status: statusForTemporal, instance_id: INSTANCE_ID });
   logger.info(logCtx({ wfId }), '✅ Workflow signaled successfully');
 }
 
@@ -145,8 +172,9 @@ async function handleNotification(msg: Notification): Promise<void> {
 async function shutdownGracefully(reason?: string) {
   logger.info(logCtx({ reason }), '🛑 Graceful shutdown requested');
 
-  try { await closeTemporalClient(); } catch {}
-  try { await closePool(); } catch {}
+  await new Promise<void>(resolve => closeWebSocketServer(resolve)); // Close WebSocket server
+  try { await closeTemporalClient(); } catch {} 
+  try { await closePool(); } catch {} 
   if (activeListenerClient) {
     try { activeListenerClient.release(); } catch {}
   }
@@ -175,6 +203,7 @@ import pRetry from 'p-retry';
     logger.info(logCtx(), '✅ PostgreSQL listener booted');
     temporalClient = await getTemporalClient();
     logger.info(logCtx(), '✅ Temporal client ready');
+    initializeWebSocketServer(logger); // Initialize WebSocket server with logger
     logger.info(logCtx(), '🎉 Application started successfully and is listening for events.');
   } catch (err) {
     logger.fatal(logCtx({ err }), '💥 Failed to start listener');

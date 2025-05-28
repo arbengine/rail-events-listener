@@ -12,10 +12,12 @@
     "p-retry": "^6.2.0",
     "pg": "^8.16.0",
     "pino": "^8",
-    "prom-client": "^14"
+    "prom-client": "^14",
+    "ws": "^8.18.2"
   },
   "devDependencies": {
     "@types/pg": "^8.10.1",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.5.0"
   },
   "engines": {
