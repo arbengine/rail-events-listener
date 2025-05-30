@@ -9,6 +9,7 @@
   "dependencies": {
     "@temporalio/client": "^1.11.8",
     "dotenv": "^16.4.5",
+    "nats": "^2.29.3",
     "p-retry": "^6.2.0",
     "pg": "^8.16.0",
     "pino": "^8",

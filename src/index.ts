@@ -5,7 +5,34 @@ import { collectDefaultMetrics, Counter } from 'prom-client';
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js';
 import type { WorkflowClient } from '@temporalio/client';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
-import { pool, query, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS } from './pg.js';
+import {
+  pool,
+  query,
+  closePool,
+  STATEMENT_TIMEOUT_MS,
+  IDLE_TX_TIMEOUT_MS,
+} from './pg.js';
+
+/* ── NATS setup (new) ───────────────────────────────────────── */
+import {
+  connect as natsConnect,
+  type NatsConnection,
+  StringCodec,
+} from 'nats';
+
+let natsConn: NatsConnection | null = null;     // LIVE connection (not a Promise)
+const sc = StringCodec();
+
+async function getNats(): Promise<NatsConnection> {
+  if (!natsConn) {
+    natsConn = await natsConnect({
+      servers: process.env.NATS_URL || 'nats://nats-scalable:4222',
+    });
+    console.log('rail-events-listener → connected to NATS');
+  }
+  return natsConn;
+}
+/* ───────────────────────────────────────────────────────────── */
 import { RailEvent, toDelta, BroadcastDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
 
@@ -146,6 +173,23 @@ async function handleNotification(msg: Notification): Promise<void> {
   const delta: BroadcastDelta = toDelta(curr!, prev, snapshotVersion);
 
   broadcast(delta); // Call the imported broadcast function
+
+/* ── NEW: publish “node done” over NATS for side-cars ── */
+if (curr.state === 'DONE') {
+  try {
+    const nc = await getNats();
+    await nc.publish(
+      `busywork.node.done.${curr.node_id}`,      // subject
+      sc.encode(JSON.stringify({
+        taskId: curr.task_id,
+        nodeId: curr.node_id,
+      })),
+    );
+    logger.debug(logCtx({ node: curr.node_id }), '📤 NATS busywork.node.done published');
+  } catch (err) {
+    logger.error(logCtx({ err }), '💥 NATS publish failed (non-fatal)');
+  }
+}
   logger.info({ deltaPayload: true, delta, taskId: curr.task_id, nodeId: curr.node_id }); // Log delta
 
   lastEventByNode.set(key, curr); // Update last event for this node
