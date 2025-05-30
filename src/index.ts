@@ -13,7 +13,7 @@ import {
   IDLE_TX_TIMEOUT_MS,
 } from './pg.js';
 
-/* ── NATS setup (new) ───────────────────────────────────────── */
+/* ── NATS setup (new) ───────────────────────────────────────── *
 import {
   connect as natsConnect,
   type NatsConnection,
