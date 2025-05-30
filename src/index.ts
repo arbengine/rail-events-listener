@@ -13,14 +13,14 @@ import {
   IDLE_TX_TIMEOUT_MS,
 } from './pg.js';
 
-/* ── NATS setup (new) ───────────────────────────────────────── *
+// ── NATS setup (new) ─────────────────────────────────────────
 import {
   connect as natsConnect,
   type NatsConnection,
   StringCodec,
 } from 'nats';
 
-let natsConn: NatsConnection | null = null;     // LIVE connection (not a Promise)
+let natsConn: NatsConnection | null = null;
 const sc = StringCodec();
 
 async function getNats(): Promise<NatsConnection> {
@@ -32,7 +32,8 @@ async function getNats(): Promise<NatsConnection> {
   }
   return natsConn;
 }
-/* ───────────────────────────────────────────────────────────── */
+// ─────────────────────────────────────────────────────────────
+
 import { RailEvent, toDelta, BroadcastDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
 
