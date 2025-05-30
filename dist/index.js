@@ -1,8 +1,8 @@
-import 'dotenv/config'; // Ensure env vars are loaded first ///
+import 'dotenv/config'; // Ensure env vars are loaded first //
 import { collectDefaultMetrics, Counter } from 'prom-client';
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
-import { pool, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS } from './pg.js';
+import { pool, query, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS } from './pg.js';
 import { toDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
 // -----------------------------------------------------------------------------
@@ -69,16 +69,14 @@ export async function bootListener() {
     await client.query(`LISTEN ${CHANNEL}`);
     logger.info(logCtx({ channel: CHANNEL }), '🔔 LISTENING for events');
     /* ---------- 30-second SQL heartbeat ---------- */
-    const heartbeat = setInterval(() => {
-        client
-            .query('SELECT 1') // light, uses the same socket
-            .then(() => {
-            logger.info(// ← show in every log view
-            logCtx(), '❤️ listener heartbeat OK');
-        })
-            .catch((err) => {
+    const heartbeat = setInterval(async () => {
+        try {
+            await query('SELECT 1'); // ✅ grabs a fresh pool connection
+            logger.info(logCtx(), '❤️ listener heartbeat OK');
+        }
+        catch (err) {
             logger.warn(logCtx({ err }), '💔 heartbeat failed – connection likely lost');
-        });
+        }
     }, 30_000);
     /* clear the interval when this client ends */
     client.once('end', () => clearInterval(heartbeat));
@@ -105,7 +103,28 @@ async function handleNotification(msg) {
     }
     const key = `${curr.task_id}:${curr.node_id}`;
     const prev = lastEventByNode.get(key) ?? null;
-    const delta = toDelta(prev, curr);
+    let snapshotVersion = -1; // Default/error value
+    try {
+        const { rows } = await query('SELECT txid_current() AS v');
+        if (rows && rows.length > 0 && rows[0].v !== null && rows[0].v !== undefined) {
+            const parsedVersion = Number(rows[0].v);
+            if (!isNaN(parsedVersion)) {
+                snapshotVersion = parsedVersion;
+                logger.info(logCtx({ taskId: curr.task_id, nodeId: curr.node_id, snapshotVersion }), 'Retrieved snapshotVersion for delta');
+            }
+            else {
+                logger.warn(logCtx({ taskId: curr.task_id, nodeId: curr.node_id, rawValue: rows[0].v }), 'Failed to convert txid_current to Number for snapshotVersion');
+            }
+        }
+        else {
+            logger.warn(logCtx({ taskId: curr.task_id, nodeId: curr.node_id, rows }), 'Failed to retrieve txid_current or rows were empty/undefined for snapshotVersion');
+        }
+    }
+    catch (err) {
+        logger.error(logCtx({ err: { message: err.message, stack: err.stack }, taskId: curr.task_id, nodeId: curr.node_id }), '💥 Error fetching txid_current for snapshot version');
+        // snapshotVersion remains -1, indicating an issue. The frontend should handle this gracefully.
+    }
+    const delta = toDelta(curr, prev, snapshotVersion);
     broadcast(delta); // Call the imported broadcast function
     logger.info({ deltaPayload: true, delta, taskId: curr.task_id, nodeId: curr.node_id }); // Log delta
     lastEventByNode.set(key, curr); // Update last event for this node
