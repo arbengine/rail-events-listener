@@ -32,7 +32,7 @@ async function getNats(): Promise<NatsConnection> {
   }
   return natsConn;
 }
-// ─────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
 
 import { RailEvent, toDelta, BroadcastDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
