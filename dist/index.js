@@ -1,5 +1,4 @@
 import 'dotenv/config'; // Ensure env vars are loaded first //
-import retry from 'p-retry';
 import { collectDefaultMetrics, Counter } from 'prom-client';
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
@@ -77,12 +76,6 @@ export async function bootListener() {
         catch { }
         activeListenerClient = undefined;
     });
-    /* 🔌 auto-reconnect when the LISTEN socket closes */
-    client.on('end', () => {
-        logger.warn(logCtx(), '🔌 LISTEN socket ended – restarting bootListener');
-        retry(bootListener, { retries: 5, minTimeout: 1_000, factor: 2 })
-            .catch(err => logger.fatal(logCtx({ err }), '💥 failed to re-boot LISTEN socket'));
-    });
     client.on('notification', (msg) => handleNotification(msg).catch((err) => {
         logger.error(logCtx({ err, payload: msg.payload }), '💥 Error in handleNotification');
         listenerErrors.inc({ instance_id: INSTANCE_ID });
@@ -107,21 +100,21 @@ export async function bootListener() {
 async function handleNotification(msg) {
     if (msg.channel !== CHANNEL || !msg.payload)
         return;
-    let curr;
+    /* ── parse JSON then map camel→snake BEFORE validating ─────────── */
+    let raw;
     try {
-        const parsedPayload = JSON.parse(msg.payload);
-        // Basic validation for RailEvent structure
-        if (typeof parsedPayload !== 'object' || parsedPayload === null ||
-            !parsedPayload.task_id || !parsedPayload.node_id || !parsedPayload.state) {
-            logger.warn(logCtx({ payload: msg.payload }), 'Received payload does not conform to RailEvent structure');
-            return;
-        }
-        curr = parsedPayload;
+        raw = JSON.parse(msg.payload);
     }
-    catch (e) {
-        logger.error(logCtx({ err: e, payload: msg.payload }), 'Failed to parse notification payload');
+    catch (err) {
+        logger.error(logCtx({ err, payload: msg.payload }), 'Failed JSON.parse');
         return;
     }
+    /* basic shape-check */
+    if (typeof raw !== 'object' || !raw.task_id || !raw.node_id || !raw.state) {
+        logger.warn(logCtx({ payload: msg.payload }), 'Received payload does not conform to RailEvent structure');
+        return;
+    }
+    const curr = raw;
     const key = `${curr.task_id}:${curr.node_id}`;
     const prev = lastEventByNode.get(key) ?? null;
     let snapshotVersion = -1; // Default/error value
