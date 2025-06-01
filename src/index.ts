@@ -134,24 +134,10 @@ export async function bootListener(): Promise<void> {
 async function handleNotification(msg: Notification): Promise<void> {
   if (msg.channel !== CHANNEL || !msg.payload) return;
 
-/* ── parse and accept both camelCase & snake_case ─────────────── */
+  /* ── parse JSON then map camel→snake BEFORE validating ─────────── */
   let raw: any;
   try {
     raw = JSON.parse(msg.payload);
-
-    // normalise camel→snake so either style passes validation.
-    if (raw.taskId        && !raw.task_id)       raw.task_id       = raw.taskId;
-    if (raw.nodeId        && !raw.node_id)       raw.node_id       = raw.nodeId;
-    if (raw.eventSubtype  && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
-
-    /* ─── NEW: also handle keys with stray spaces (router bug) ─── */
-    for (const k of Object.keys(raw)) {
-      const trimmed = k.trim();
-      if (trimmed !== k && raw[trimmed] === undefined) {
-        raw[trimmed] = raw[k];       // copy value
-        delete raw[k];               // drop spaced key
-      }
-    }
   } catch (err) {
     logger.error(logCtx({ err, payload: msg.payload }), 'Failed JSON.parse');
     return;
