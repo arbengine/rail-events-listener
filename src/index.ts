@@ -37,7 +37,7 @@ async function getNats(): Promise<NatsConnection> {
 import { RailEvent, toDelta, BroadcastDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
 
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // Lightweight console-based logger (swap for pino in prod if desired)
 export const logger = {
   info : (...a: any[]) => console.log(...a),
