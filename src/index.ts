@@ -134,23 +134,33 @@ export async function bootListener(): Promise<void> {
 async function handleNotification(msg: Notification): Promise<void> {
   if (msg.channel !== CHANNEL || !msg.payload) return;
 
-  /* ── parse JSON then map camel→snake BEFORE validating ─────────── */
+  /* ── parse JSON ─────────────────────────────── */
   let raw: any;
   try {
     raw = JSON.parse(msg.payload);
+
+    /* 1️⃣  copy camelCase → snake_case */
+    if (raw.taskId        && !raw.task_id)       raw.task_id       = raw.taskId;
+    if (raw.nodeId        && !raw.node_id)       raw.node_id       = raw.nodeId;
+    if (raw.eventSubtype  && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
+
+    /* 2️⃣  trim *key* names that carry stray spaces */
+    for (const k of Object.keys(raw)) {
+      const trimmed = k.trim();
+      if (trimmed !== k && raw[trimmed] === undefined) {
+        raw[trimmed] = raw[k];
+        delete raw[k];
+      }
+    }
   } catch (err) {
     logger.error(logCtx({ err, payload: msg.payload }), 'Failed JSON.parse');
     return;
   }
 
-  // map field names once
-  if (raw.taskId       && !raw.task_id)       raw.task_id       = raw.taskId;
-  if (raw.nodeId       && !raw.node_id)       raw.node_id       = raw.nodeId;
-  if (raw.eventSubtype && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
-
-  if (!raw.task_id || !raw.node_id || !raw.state) {
-    logger.warn(logCtx({ payload: msg.payload }),
-                'Ignored payload – missing required fields');
+  /* 3️⃣  shape-check AFTER normalisation */
+  if (typeof raw !== 'object' || !raw.task_id || !raw.node_id || !raw.state) {
+    logger.warn(logCtx({ payload: msg.payload, normalised: raw }),
+                'Received payload does not conform to RailEvent');
     return;
   }
 
