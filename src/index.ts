@@ -143,10 +143,14 @@ async function handleNotification(msg: Notification): Promise<void> {
     return;
   }
 
-  /* basic shape-check */
-  if (typeof raw !== 'object' || !raw.task_id || !raw.node_id || !raw.state) {
+  // map field names once
+  if (raw.taskId       && !raw.task_id)       raw.task_id       = raw.taskId;
+  if (raw.nodeId       && !raw.node_id)       raw.node_id       = raw.nodeId;
+  if (raw.eventSubtype && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
+
+  if (!raw.task_id || !raw.node_id || !raw.state) {
     logger.warn(logCtx({ payload: msg.payload }),
-                'Received payload does not conform to RailEvent structure');
+                'Ignored payload – missing required fields');
     return;
   }
 
