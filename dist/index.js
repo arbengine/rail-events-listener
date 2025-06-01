@@ -95,7 +95,7 @@ export async function bootListener() {
     /* clear the interval when this client ends */
     client.once('end', () => clearInterval(heartbeat));
 }
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 /** Parse and forward one NOTIFY payload. */
 async function handleNotification(msg) {
     if (msg.channel !== CHANNEL || !msg.payload)
@@ -109,9 +109,15 @@ async function handleNotification(msg) {
         logger.error(logCtx({ err, payload: msg.payload }), 'Failed JSON.parse');
         return;
     }
-    /* basic shape-check */
-    if (typeof raw !== 'object' || !raw.task_id || !raw.node_id || !raw.state) {
-        logger.warn(logCtx({ payload: msg.payload }), 'Received payload does not conform to RailEvent structure');
+    // map field names once
+    if (raw.taskId && !raw.task_id)
+        raw.task_id = raw.taskId;
+    if (raw.nodeId && !raw.node_id)
+        raw.node_id = raw.nodeId;
+    if (raw.eventSubtype && !raw.event_subtype)
+        raw.event_subtype = raw.eventSubtype;
+    if (!raw.task_id || !raw.node_id || !raw.state) {
+        logger.warn(logCtx({ payload: msg.payload }), 'Ignored payload – missing required fields');
         return;
     }
     const curr = raw;
