@@ -134,20 +134,22 @@ export async function bootListener(): Promise<void> {
 async function handleNotification(msg: Notification): Promise<void> {
   if (msg.channel !== CHANNEL || !msg.payload) return;
 
-  let raw;
+/* ── parse and accept both camelCase & snake_case ─────────────── */
+  let raw: any;
   try {
     raw = JSON.parse(msg.payload);
-  } catch (e) {
-    logger.error(logCtx({ err: e, payload: msg.payload }), 'Failed to parse notification payload');
+
+    // normalise camel→snake so either style passes validation
+    if (raw.taskId        && !raw.task_id)       raw.task_id       = raw.taskId;
+    if (raw.nodeId        && !raw.node_id)       raw.node_id       = raw.nodeId;
+    if (raw.eventSubtype  && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
+  } catch (err) {
+    logger.error(logCtx({ err, payload: msg.payload }), 'Failed JSON.parse');
     return;
   }
 
-  // 🔄 normalise camel→snake so both styles work
-  if (raw.taskId && !raw.task_id)   raw.task_id  = raw.taskId;
-  if (raw.nodeId && !raw.node_id)   raw.node_id  = raw.nodeId;
-  if (raw.eventSubtype && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
-
-  if (typeof raw !== 'object' || raw === null || !raw.task_id || !raw.node_id || !raw.state) {
+  /* basic shape-check */
+  if (typeof raw !== 'object' || !raw.task_id || !raw.node_id || !raw.state) {
     logger.warn(logCtx({ payload: msg.payload }),
                 'Received payload does not conform to RailEvent structure');
     return;
