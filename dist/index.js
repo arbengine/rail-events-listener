@@ -1,4 +1,5 @@
 import 'dotenv/config'; // Ensure env vars are loaded first //
+import retry from 'p-retry';
 import { collectDefaultMetrics, Counter } from 'prom-client';
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
@@ -16,10 +17,10 @@ async function getNats() {
     }
     return natsConn;
 }
-// ─────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
 import { toDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // Lightweight console-based logger (swap for pino in prod if desired)
 export const logger = {
     info: (...a) => console.log(...a),
@@ -32,7 +33,7 @@ export const logger = {
 // -----------------------------------------------------------------------------
 collectDefaultMetrics({ prefix: 'rail_events_listener_' });
 const lastEventByNode = new Map(); // key = taskId:nodeId
-const CHANNEL = process.env.PG_CHANNEL || 'rail_events';
+const CHANNEL = process.env.PG_CHANNEL || 'rail_event';
 const USE_DAG_RUNNER = process.env.DAG_RUNNER === 'true';
 const INSTANCE_ID = process.env.HOSTNAME || 'unknown';
 const listenerErrors = new Counter({
@@ -75,6 +76,12 @@ export async function bootListener() {
         }
         catch { }
         activeListenerClient = undefined;
+    });
+    /* 🔌 auto-reconnect when the LISTEN socket closes */
+    client.on('end', () => {
+        logger.warn(logCtx(), '🔌 LISTEN socket ended – restarting bootListener');
+        retry(bootListener, { retries: 5, minTimeout: 1_000, factor: 2 })
+            .catch(err => logger.fatal(logCtx({ err }), '💥 failed to re-boot LISTEN socket'));
     });
     client.on('notification', (msg) => handleNotification(msg).catch((err) => {
         logger.error(logCtx({ err, payload: msg.payload }), '💥 Error in handleNotification');
