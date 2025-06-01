@@ -139,7 +139,7 @@ async function handleNotification(msg: Notification): Promise<void> {
   try {
     raw = JSON.parse(msg.payload);
 
-    // normalise camel→snake so either style passes validation
+    // normalise camel→snake so either style passes validation.
     if (raw.taskId        && !raw.task_id)       raw.task_id       = raw.taskId;
     if (raw.nodeId        && !raw.node_id)       raw.node_id       = raw.nodeId;
     if (raw.eventSubtype  && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
