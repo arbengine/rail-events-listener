@@ -134,20 +134,26 @@ export async function bootListener(): Promise<void> {
 async function handleNotification(msg: Notification): Promise<void> {
   if (msg.channel !== CHANNEL || !msg.payload) return;
 
-  let curr: RailEvent;
+  let raw;
   try {
-    const parsedPayload = JSON.parse(msg.payload);
-    // Basic validation for RailEvent structure
-    if (typeof parsedPayload !== 'object' || parsedPayload === null || 
-        !parsedPayload.task_id || !parsedPayload.node_id || !parsedPayload.state) {
-      logger.warn(logCtx({ payload: msg.payload }), 'Received payload does not conform to RailEvent structure');
-      return;
-    }
-    curr = parsedPayload as RailEvent;
+    raw = JSON.parse(msg.payload);
   } catch (e) {
     logger.error(logCtx({ err: e, payload: msg.payload }), 'Failed to parse notification payload');
     return;
   }
+
+  // 🔄 normalise camel→snake so both styles work
+  if (raw.taskId && !raw.task_id)   raw.task_id  = raw.taskId;
+  if (raw.nodeId && !raw.node_id)   raw.node_id  = raw.nodeId;
+  if (raw.eventSubtype && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
+
+  if (typeof raw !== 'object' || raw === null || !raw.task_id || !raw.node_id || !raw.state) {
+    logger.warn(logCtx({ payload: msg.payload }),
+                'Received payload does not conform to RailEvent structure');
+    return;
+  }
+
+  const curr: RailEvent = raw as RailEvent;
 
   const key = `${curr.task_id}:${curr.node_id}`;
   const prev = lastEventByNode.get(key) ?? null;
