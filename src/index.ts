@@ -53,7 +53,7 @@ collectDefaultMetrics({ prefix: 'rail_events_listener_' });
 
 const lastEventByNode = new Map<string, RailEvent>(); // key = taskId:nodeId
 
-const CHANNEL        = process.env.PG_CHANNEL || 'rail_events';
+const CHANNEL        = process.env.PG_CHANNEL || 'rail_event';
 const USE_DAG_RUNNER = process.env.DAG_RUNNER === 'true';
 const INSTANCE_ID    = process.env.HOSTNAME || 'unknown';
 
