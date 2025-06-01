@@ -105,15 +105,6 @@ export async function bootListener(): Promise<void> {
     activeListenerClient = undefined;
   });
 
-  /* 🔌 auto-reconnect when the LISTEN socket closes */
-  client.on('end', () => {
-    logger.warn(logCtx(), '🔌 LISTEN socket ended – restarting bootListener');
-    retry(bootListener, { retries: 5, minTimeout: 1_000, factor: 2 })
-      .catch(err =>
-        logger.fatal(logCtx({ err }), '💥 failed to re-boot LISTEN socket')
-      );
-  });
-
   client.on('notification', (msg: Notification) =>
     handleNotification(msg).catch((err) => {
       logger.error(logCtx({ err, payload: msg.payload }), '💥 Error in handleNotification');
