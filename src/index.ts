@@ -129,7 +129,7 @@ export async function bootListener(): Promise<void> {
   client.once('end', () => clearInterval(heartbeat));
 }
 
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 /** Parse and forward one NOTIFY payload. */
 async function handleNotification(msg: Notification): Promise<void> {
   if (msg.channel !== CHANNEL || !msg.payload) return;
