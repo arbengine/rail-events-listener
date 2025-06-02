@@ -19,9 +19,14 @@ async function main() {
             onFailedAttempt: (err) => log.warn({ attempt: err.attemptNumber, left: err.retriesLeft, msg: err.message }, 'Listener boot failed'),
         });
         log.info('✅ PostgreSQL listener ready');
-        log.info('Pre-warming Temporal client…');
-        await getTemporalClient();
-        log.info('✅ Temporal client ready');
+        if (process.env.USE_DAG_RUNNER === 'true') {
+            log.info('Pre-warming Temporal client…');
+            await getTemporalClient();
+            log.info('✅ Temporal client ready');
+        }
+        else {
+            log.info('ℹ️ Temporal client pre-warming skipped (USE_DAG_RUNNER is not true)');
+        }
         log.info('🎉 Application fully started and listening for events');
     }
     catch (err) {
@@ -33,10 +38,12 @@ async function main() {
 async function shutdown(cause) {
     if (cause)
         log.warn({ cause }, '🚦 Shutting down due to error');
-    try {
-        await closeTemporalClient();
+    if (process.env.USE_DAG_RUNNER === 'true') {
+        try {
+            await closeTemporalClient();
+        }
+        catch { }
     }
-    catch { }
     try {
         await closePool();
     }

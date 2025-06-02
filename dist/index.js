@@ -3,20 +3,14 @@ import { collectDefaultMetrics, Counter } from 'prom-client';
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
 import { pool, query, closePool, STATEMENT_TIMEOUT_MS, IDLE_TX_TIMEOUT_MS, } from './pg.js';
-// ── NATS setup (new) ─────────────────────────────────────────
-import { connect as natsConnect, StringCodec, } from 'nats';
-let natsConn = null;
+/* ─── NEW: NATS client ──────────────────────────────── */
+import { connect as natsConnect, StringCodec } from 'nats';
+/* one global connection reused by every notify */
+const nc = await natsConnect({
+    servers: process.env.NATS_URL || 'nats://nats-scalable:4222',
+});
 const sc = StringCodec();
-async function getNats() {
-    if (!natsConn) {
-        natsConn = await natsConnect({
-            servers: process.env.NATS_URL || 'nats://nats-scalable:4222',
-        });
-        console.log('rail-events-listener → connected to NATS');
-    }
-    return natsConn;
-}
-// ────────────────────────────────────────────────────────────
+console.log('[rail-events] ✅ connected to NATS');
 import { toDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
 // ----------------------------------------------------------------------------
@@ -95,7 +89,7 @@ export async function bootListener() {
     /* clear the interval when this client ends */
     client.once('end', () => clearInterval(heartbeat));
 }
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 /** Parse and forward one NOTIFY payload. */
 async function handleNotification(msg) {
     if (msg.channel !== CHANNEL || !msg.payload)
@@ -154,11 +148,27 @@ async function handleNotification(msg) {
         // snapshotVersion remains -1, indicating an issue. The frontend should handle this gracefully.
     }
     const delta = toDelta(curr, prev, snapshotVersion);
+    /* ── NEW: publish READY over NATS ─────────────────────────────── */
+    if (delta.state === 'WAITING_AI' && delta.eventSubtype === 'READY') {
+        // grab scratch-pad once for the prompt
+        const { rows: [node] } = await query(`SELECT pending_instructions_md AS md
+         FROM execution_nodes
+        WHERE node_id = $1`, [delta.nodeId]);
+        const payload = {
+            taskId: delta.taskId,
+            nodeId: delta.nodeId,
+            attempt: 1, // bump on every retry later
+            md: node?.md ?? null, // scratch-pad or null
+        };
+        const subj = `busywork.node.ready.${delta.nodeId}`;
+        nc.publish(subj, sc.encode(JSON.stringify(payload)));
+        logger.debug(logCtx({ node: delta.nodeId }), '📤 NATS busywork.node.ready published');
+    }
+    /* ─────────────────────────────────────────────────────────────── */
     broadcast(delta); // Call the imported broadcast function
     /* ── NEW: publish “node done” over NATS for side-cars ── */
     if (curr.state === 'DONE') {
         try {
-            const nc = await getNats();
             await nc.publish(`busywork.node.done.${curr.node_id}`, // subject
             sc.encode(JSON.stringify({
                 taskId: curr.task_id,
