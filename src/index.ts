@@ -180,7 +180,7 @@ async function handleNotification(msg: Notification): Promise<void> {
 
   const delta: BroadcastDelta = toDelta(curr!, prev, snapshotVersion);
 
-  /* ── NEW: publish READY over NATS ─────────────────────────────── */
+  /* ── NEW: publish READY over NATS ────────────────────────────── */
   if (delta.state === 'WAITING_AI' && delta.eventSubtype === 'READY') {
     // grab scratch-pad once for the prompt
     const { rows: [node] } = await query(
