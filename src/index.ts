@@ -180,6 +180,28 @@ async function handleNotification(msg: Notification): Promise<void> {
 
   const delta: BroadcastDelta = toDelta(curr!, prev, snapshotVersion);
 
+  /* ── NEW: publish READY over NATS ─────────────────────────────── */
+  if (delta.state === 'WAITING_AI' && delta.eventSubtype === 'READY') {
+    // grab scratch-pad once for the prompt
+    const { rows: [node] } = await query(
+      `SELECT pending_instructions_md AS md
+         FROM execution_nodes
+        WHERE node_id = $1`,
+      [delta.nodeId],
+    );
+
+    const payload = {
+      taskId : delta.taskId,
+      nodeId : delta.nodeId,
+      attempt: 1,                // bump on every retry later
+      md     : node?.md ?? null, // scratch-pad or null
+    };
+
+    const subj = `busywork.node.ready.${delta.nodeId}`;
+    nc.publish(subj, sc.encode(JSON.stringify(payload)));
+    logger.debug(logCtx({ node: delta.nodeId }), '📤 NATS busywork.node.ready published');
+  }
+  /* ─────────────────────────────────────────────────────────────── */
   broadcast(delta); // Call the imported broadcast function
 
 /* ── NEW: publish “node done” over NATS for side-cars ── */
