@@ -13,26 +13,16 @@ import {
   IDLE_TX_TIMEOUT_MS,
 } from './pg.js';
 
-// ── NATS setup (new) ─────────────────────────────────────────
-import {
-  connect as natsConnect,
-  type NatsConnection,
-  StringCodec,
-} from 'nats';
+/* ─── NEW: NATS client ──────────────────────────────── */
+import { connect as natsConnect, StringCodec } from 'nats';
 
-let natsConn: NatsConnection | null = null;
+/* one global connection reused by every notify */
+const nc = await natsConnect({
+  servers: process.env.NATS_URL || 'nats://nats-scalable:4222',
+});
 const sc = StringCodec();
 
-async function getNats(): Promise<NatsConnection> {
-  if (!natsConn) {
-    natsConn = await natsConnect({
-      servers: process.env.NATS_URL || 'nats://nats-scalable:4222',
-    });
-    console.log('rail-events-listener → connected to NATS');
-  }
-  return natsConn;
-}
-// ────────────────────────────────────────────────────────────
+console.log('[rail-events] ✅ connected to NATS');
 
 import { RailEvent, toDelta, BroadcastDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
@@ -195,7 +185,6 @@ async function handleNotification(msg: Notification): Promise<void> {
 /* ── NEW: publish “node done” over NATS for side-cars ── */
 if (curr.state === 'DONE') {
   try {
-    const nc = await getNats();
     await nc.publish(
       `busywork.node.done.${curr.node_id}`,      // subject
       sc.encode(JSON.stringify({
