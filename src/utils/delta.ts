@@ -34,10 +34,9 @@ export function toDelta(
     state  : curr.state,
     version: snapshotVersion,
     title  : curr.generated_title ?? undefined,
-    // Only include eventSubtype field if it changed (or if this is first row)
-    ...(curr.event_subtype &&
-       (!prev || prev.event_subtype !== curr.event_subtype)
-       ? { eventSubtype: curr.event_subtype }
+    // Include eventSubtype if present in the current event
+    ...(curr.event_subtype
+       ? { eventSubtype: curr.event_subtype }   // ← keep unconditionally
        : {}),
   };
 }
