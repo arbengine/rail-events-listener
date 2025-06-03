@@ -1,6 +1,6 @@
 /**
- * Convert a full rail_event row into the minimal delta.
- * `snapshotVersion` must be supplied by the caller (see worker below).
+ * Pure helper: diff *curr* vs *prev* and emit the lean BroadcastDelta
+ * The caller (rail-events listener) supplies the monotonic snapshotVersion.
  */
 export function toDelta(curr, prev, snapshotVersion) {
     return {
@@ -9,9 +9,10 @@ export function toDelta(curr, prev, snapshotVersion) {
         nodeId: curr.node_id,
         state: curr.state,
         version: snapshotVersion,
-        ...(curr.event_subtype &&
-            (!prev || prev.event_subtype !== curr.event_subtype)
-            ? { eventSubtype: curr.event_subtype }
-            : {})
+        title: curr.generated_title ?? undefined,
+        // Include eventSubtype if present in the current event
+        ...(curr.event_subtype
+            ? { eventSubtype: curr.event_subtype } // ← keep unconditionally
+            : {}),
     };
 }
