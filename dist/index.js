@@ -148,7 +148,7 @@ async function handleNotification(msg) {
         // snapshotVersion remains -1, indicating an issue. The frontend should handle this gracefully.
     }
     const delta = toDelta(curr, prev, snapshotVersion);
-    /* ── NEW: publish READY over NATS ────────────-────────────────── */
+    /* ── NEW: publish READY over NATS ────────────-──────────────── */
     if (delta.state === 'WAITING_AI') {
         // grab scratch-pad once for the prompt
         const { rows: [node] } = await query(`SELECT pending_instructions_md AS md
