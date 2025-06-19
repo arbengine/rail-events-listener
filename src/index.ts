@@ -158,27 +158,8 @@ async function handleNotification(msg: Notification): Promise<void> {
 
   const key = `${curr.task_id}:${curr.node_id}`;
   const prev = lastEventByNode.get(key) ?? null;
-  let snapshotVersion: number = -1; // Default/error value
 
-  try {
-    const { rows } = await query('SELECT txid_current() AS v');
-    if (rows && rows.length > 0 && rows[0].v !== null && rows[0].v !== undefined) {
-      const parsedVersion = Number(rows[0].v);
-      if (!isNaN(parsedVersion)) {
-        snapshotVersion = parsedVersion;
-        logger.info(logCtx({ taskId: curr.task_id, nodeId: curr.node_id, snapshotVersion }), 'Retrieved snapshotVersion for delta');
-      } else {
-        logger.warn(logCtx({ taskId: curr.task_id, nodeId: curr.node_id, rawValue: rows[0].v }), 'Failed to convert txid_current to Number for snapshotVersion');
-      }
-    } else {
-      logger.warn(logCtx({ taskId: curr.task_id, nodeId: curr.node_id, rows }), 'Failed to retrieve txid_current or rows were empty/undefined for snapshotVersion');
-    }
-  } catch (err: any) {
-    logger.error(logCtx({ err: { message: err.message, stack: err.stack }, taskId: curr.task_id, nodeId: curr.node_id }), '💥 Error fetching txid_current for snapshot version');
-    // snapshotVersion remains -1, indicating an issue. The frontend should handle this gracefully.
-  }
-
-  const delta: BroadcastDelta = toDelta(curr!, prev, snapshotVersion);
+  const delta: BroadcastDelta = toDelta(curr!, prev);
 
   /* ── NEW: publish READY over NATS ─────────--──-────────────── */
   if (delta.state === 'WAITING_AI') {
@@ -204,7 +185,7 @@ async function handleNotification(msg: Notification): Promise<void> {
   /* ─────────────────────────────────────────────────────────────── */
   broadcast(delta); // Call the imported broadcast function
 
-/* ── NEW: publish “node done” over NATS for side-cars ── */
+/* ── NEW: publish "node done" over NATS for side-cars ── */
 if (curr.state === 'DONE') {
   try {
     await nc.publish(
