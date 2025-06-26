@@ -7,7 +7,7 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@busywork/core": "^0.5.4",
+    "@busywork/core": "^0.5.7",
     "@temporalio/client": "^1.11.8",
     "dotenv": "^16.4.5",
     "nats": "^2.29.3",
