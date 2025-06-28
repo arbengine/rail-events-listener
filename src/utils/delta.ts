@@ -1,4 +1,4 @@
-// src/utils/delta.ts
+// src/utils/delta.ts/
 export interface BroadcastDelta {
   v: number;                  // Delta version (1)
   taskId: string;
