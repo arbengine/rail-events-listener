@@ -4,7 +4,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // ⚠️ dev-only: trust self-s
 
 import pino from 'pino';
 import pRetry from 'p-retry';
-import { bootListener } from './index.js'; // compiled JS path
+import { bootCleanListener } from './index.js'; // compiled JS path
 import { getTemporalClient, closeTemporalClient } from './temporalClient.js';
 import { closePool } from './pg.js';
 
@@ -15,7 +15,7 @@ async function main(): Promise<void> {
 
   try {
     log.info('Booting PostgreSQL listener…');
-    await pRetry(bootListener, {
+    await pRetry(bootCleanListener, {
       retries: Number(process.env.INITIAL_BOOT_RETRIES ?? 5),
       minTimeout: Number(process.env.INITIAL_BOOT_MIN_TIMEOUT_MS ?? 1_000),
       maxTimeout: Number(process.env.INITIAL_BOOT_MAX_TIMEOUT_MS ?? 30_000),
