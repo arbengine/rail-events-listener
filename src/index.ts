@@ -3,7 +3,7 @@
 // 🔔 NOTIFICATIONS: Catches and handles all worker notifications  
 // ⚡ REAL-TIME: Event processing for clean architecture
 // 🛡️ SSL BYPASS: Same approach as routing worker and template hydrator
-// -------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // 🛡️ SSL BYPASS: Same as your other workers
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
