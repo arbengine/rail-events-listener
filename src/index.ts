@@ -216,6 +216,7 @@ export async function bootFixedListener(): Promise<void> {
       'template_hydrated',                  // Template hydration complete
       'task_routed',                        // Task routing notifications
       'node_state_change',                  // Direct node state changes
+      'dynamic_node_spawned',               // Dynamic node spawning notifications
     ];
     
     for (const channel of channels) {
@@ -338,6 +339,9 @@ async function handleFixedNotification(msg: Notification): Promise<void> {
       break;
     case 'nats_bridge':
       await handleNatsBridgeNotification(msg);
+      break;
+    case 'dynamic_node_spawned':
+      await handleDynamicNodeSpawnNotification(msg);
       break;
     default:
       logger.debug(logCtx({ channel: msg.channel }), '📝 Generic notification logged');
@@ -636,6 +640,44 @@ async function handleNatsBridgeNotification(msg: Notification): Promise<void> {
   } catch (error) {
     logger.error(logCtx({ error }), '❌ Error handling NATS bridge notification');
     listenerErrors.inc({ instance_id: INSTANCE_ID, error_type: 'nats_bridge_notification' });
+  }
+}
+
+async function handleDynamicNodeSpawnNotification(msg: Notification): Promise<void> {
+  try {
+    const payload = JSON.parse(msg.payload!);
+    const { task_id, parent_id, spawned_ids } = payload;
+    
+    logger.info(logCtx({ 
+      task_id, 
+      parent_id, 
+      spawned_count: spawned_ids.length 
+    }), '🌟 Dynamic nodes spawned');
+    
+    // Broadcast to WebSocket for real-time updates
+    broadcast({
+      v: 1,
+      taskId: task_id,
+      nodeId: parent_id,
+      state: 'spawned_children',
+      title: `Spawned ${spawned_ids.length} dynamic nodes`,
+      metadata: {
+        spawned_ids,
+        parent_id,
+        spawn_type: 'runtime_conditional'
+      },
+      architecture: 'dynamic_dag',
+      timestamp: new Date().toISOString()
+    });
+    
+    notificationsProcessed.inc({ 
+      status: 'dynamic_spawn', 
+      instance_id: INSTANCE_ID,
+      workflow_stage: 'dynamic_generation'
+    });
+    
+  } catch (error) {
+    logger.error(logCtx({ error }), '❌ Error handling dynamic spawn notification');
   }
 }
 
