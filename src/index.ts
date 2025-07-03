@@ -1,9 +1,12 @@
 // rail-events-listener/src/index.ts
-// 🔧 FIXED: Robust Rail Events Listener with Proper Connection Management
-// 🔔 NOTIFICATIONS: Now properly catches and handles all worker notifications
-// 🚀 BULLETPROOF: Enhanced error handling and connection recovery
-// ⚡ REAL-TIME: Guaranteed event processing for clean architecture
+// 🔧 FIXED: Rail Events Listener with SSL bypass (same as other workers)
+// 🔔 NOTIFICATIONS: Catches and handles all worker notifications  
+// ⚡ REAL-TIME: Event processing for clean architecture
+// 🛡️ SSL BYPASS: Same approach as routing worker and template hydrator
 // -------------------------------------------------------------------------------
+
+// 🛡️ SSL BYPASS: Same as your other workers
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 import 'dotenv/config';
 import type { Notification, PoolClient } from 'pg';
@@ -20,7 +23,7 @@ import {
   IDLE_TX_TIMEOUT_MS,
 } from './pg.js';
 
-/* ─── 🔧 FIXED: Enhanced NATS client with proper error handling ──────────────────────────────── */
+/* ─── NATS client ──────────────────────────────── */
 import { connect as natsConnect, StringCodec, NatsConnection } from 'nats';
 
 let natsConnection: NatsConnection | null = null;
@@ -47,7 +50,7 @@ async function getNatsConnection(): Promise<NatsConnection> {
 import { RailEvent, toDelta, BroadcastDelta } from './utils/delta.js';
 import { initializeWebSocketServer, broadcast, closeWebSocketServer } from './websocketServer.js';
 
-// Enhanced logger for clean architecture
+// Logger
 export const logger = {
   info : (...a: any[]) => console.log(new Date().toISOString(), '[INFO]', ...a),
   warn : (...a: any[]) => console.warn(new Date().toISOString(), '[WARN]', ...a),
@@ -57,7 +60,7 @@ export const logger = {
   fatal: (...a: any[]) => console.error(new Date().toISOString(), '[FATAL]', ...a),
 };
 
-// Enhanced metrics for clean architecture
+// Metrics
 collectDefaultMetrics({ prefix: 'rail_events_listener_fixed_' });
 
 const lastEventByNode = new Map<string, RailEvent>();
@@ -66,13 +69,12 @@ const CHANNEL        = process.env.PG_CHANNEL || 'rail_event';
 const USE_DAG_RUNNER = process.env.DAG_RUNNER === 'true';
 const INSTANCE_ID    = process.env.HOSTNAME || 'fixed-rail-listener';
 
-// 🔧 FIXED: Enhanced connection tracking
+// Connection tracking
 let activeListenerClient: PoolClient | undefined;
 let isShuttingDown = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 let heartbeatInterval: NodeJS.Timeout | null = null;
-let connectionCheckInterval: NodeJS.Timeout | null = null;
 
 const listenerErrors = new Counter({
   name: 'busywork_fixed_listener_errors_total',
@@ -107,36 +109,13 @@ const logCtx = (extra: Record<string, any> = {}) => ({
 
 let temporalClient: WorkflowClient | undefined;
 
-// 🔧 FIXED: Enhanced connection monitoring
-function startConnectionMonitoring() {
-  if (connectionCheckInterval) {
-    clearInterval(connectionCheckInterval);
-  }
-  
-  connectionCheckInterval = setInterval(async () => {
-    if (isShuttingDown) return;
-    
-    // Check if we still have an active listener client
-    if (!activeListenerClient) {
-      logger.warn(logCtx(), '⚠️ No active listener client detected - attempting reconnection');
-      connectionEvents.inc({ event_type: 'missing_client', instance_id: INSTANCE_ID });
-      
-      try {
-        await bootFixedListener();
-      } catch (error) {
-        logger.error(logCtx({ error }), '❌ Failed to reconnect listener client');
-      }
-    }
-  }, 10000); // Check every 10 seconds
-}
-
-// 🔧 FIXED: Robust listener with enhanced error handling and recovery
+// 🔧 FIXED: Simple listener boot with SSL bypass
 export async function bootFixedListener(): Promise<void> {
   if (isShuttingDown) return;
   
   logger.info(logCtx(), '🚀 Attempting to connect to PostgreSQL for FIXED LISTEN...');
 
-  // Clean up existing connection properly
+  // Clean up existing connection
   if (activeListenerClient) {
     try {
       logger.debug(logCtx(), '🧹 Cleaning up existing listener connection');
@@ -159,25 +138,21 @@ export async function bootFixedListener(): Promise<void> {
       reconnect_attempt: reconnectAttempts + 1
     }), '✅ Connected to PostgreSQL for FIXED LISTEN');
 
-    // 🔧 FIXED: Enhanced session configuration
+    // Session configuration (same as your other workers)
     await client.query(`
       SET statement_timeout TO 0;
       SET idle_in_transaction_session_timeout TO 0;
       SET client_min_messages TO WARNING;
-      SET tcp_keepalives_idle TO 600;
-      SET tcp_keepalives_interval TO 30;
-      SET tcp_keepalives_count TO 3;
     `);
     
-    logger.debug(logCtx(), '⚙️ Session timeouts and keepalives configured for FIXED LISTEN');
+    logger.debug(logCtx(), '⚙️ Session configured for FIXED LISTEN');
 
-    // 🔧 FIXED: Enhanced error handling with proper reconnection
+    // Error handling
     client.on('error', async (err: Error) => {
       connectionEvents.inc({ event_type: 'connection_error', instance_id: INSTANCE_ID });
       listenerErrors.inc({ instance_id: INSTANCE_ID, error_type: 'connection' });
-      logger.error(logCtx({ error: err.message, stack: err.stack }), '💥 PostgreSQL FIXED LISTEN client error');
+      logger.error(logCtx({ error: err.message }), '💥 PostgreSQL FIXED LISTEN client error');
       
-      // Mark client as inactive
       activeListenerClient = undefined;
       
       if (!isShuttingDown) {
@@ -209,14 +184,13 @@ export async function bootFixedListener(): Promise<void> {
       }
     });
 
-    // 🔧 FIXED: Enhanced notification handler with detailed logging
+    // Notification handler
     client.on('notification', async (msg: Notification) => {
       try {
         notificationsReceived.inc({ channel: msg.channel, instance_id: INSTANCE_ID });
         logger.info(logCtx({ 
           channel: msg.channel, 
           payload_length: msg.payload?.length || 0,
-          payload_preview: msg.payload?.substring(0, 100) + (msg.payload && msg.payload.length > 100 ? '...' : '')
         }), '🔔 NOTIFICATION RECEIVED');
         
         await handleFixedNotification(msg);
@@ -226,13 +200,12 @@ export async function bootFixedListener(): Promise<void> {
         logger.error(logCtx({ 
           error: error instanceof Error ? error.message : String(error), 
           channel: msg.channel,
-          payload: msg.payload 
         }), '💥 Error in FIXED notification handler');
         listenerErrors.inc({ instance_id: INSTANCE_ID, error_type: 'notification_handling' });
       }
     });
 
-    // 🔧 FIXED: Listen to ALL channels that workers might use
+    // Listen to ALL channels that workers use
     const channels = [
       CHANNEL,                              // Standard rail_event
       'task_ready_for_dag_generation',      // Intelligence → Segmentation
@@ -255,7 +228,7 @@ export async function bootFixedListener(): Promise<void> {
       channels: channels
     }), '🔔 LISTENING for FIXED events on ALL channels');
 
-    // 🔧 FIXED: Enhanced heartbeat with connection validation
+    // Start heartbeat
     startFixedHeartbeat();
     
     // Reset reconnect attempts on successful connection
@@ -293,7 +266,7 @@ export async function bootFixedListener(): Promise<void> {
   }
 }
 
-// 🔧 FIXED: Enhanced heartbeat with actual connection testing
+// Heartbeat
 function startFixedHeartbeat() {
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
@@ -305,28 +278,25 @@ function startFixedHeartbeat() {
     }
     
     try {
-      // Test the connection with a simple query
-      await activeListenerClient.query('SELECT 1 as heartbeat, NOW() as timestamp');
-      logger.debug(logCtx(), '❤️ FIXED heartbeat OK - connection alive');
+      await activeListenerClient.query('SELECT 1 as heartbeat');
+      logger.debug(logCtx(), '❤️ FIXED heartbeat OK');
     } catch (error) {
       logger.error(logCtx({ 
         error: error instanceof Error ? error.message : String(error) 
-      }), '💔 FIXED heartbeat failed - connection likely dead');
+      }), '💔 FIXED heartbeat failed');
       
       connectionEvents.inc({ event_type: 'heartbeat_failure', instance_id: INSTANCE_ID });
       
-      // Mark connection as dead and trigger reconnection
       if (activeListenerClient) {
         try {
           activeListenerClient.removeAllListeners();
           activeListenerClient.release();
         } catch (cleanupError) {
-          logger.debug(logCtx({ cleanupError }), '🧹 Error during heartbeat cleanup (expected)');
+          // Ignore cleanup errors
         }
         activeListenerClient = undefined;
       }
       
-      // Restart listener
       if (!isShuttingDown) {
         setTimeout(() => {
           if (!isShuttingDown) {
@@ -337,10 +307,10 @@ function startFixedHeartbeat() {
         }, 1000);
       }
     }
-  }, 15000); // Check every 15 seconds (more frequent)
+  }, 30000); // Check every 30 seconds
 }
 
-// 🔧 FIXED: Enhanced notification handler with proper routing
+// Notification router
 async function handleFixedNotification(msg: Notification): Promise<void> {
   if (!msg.payload) {
     logger.warn(logCtx({ channel: msg.channel }), '⚠️ Received notification with empty payload');
@@ -350,7 +320,6 @@ async function handleFixedNotification(msg: Notification): Promise<void> {
   logger.info(logCtx({ 
     channel: msg.channel,
     payload_length: msg.payload.length,
-    processing_start: true 
   }), '🔄 Processing notification...');
 
   /* Route to appropriate handler based on channel */
@@ -370,47 +339,35 @@ async function handleFixedNotification(msg: Notification): Promise<void> {
     case 'nats_bridge':
       await handleNatsBridgeNotification(msg);
       break;
-    case 'worker_status':
-      await handleWorkerStatusNotification(msg);
-      break;
-    case 'template_hydrated':
-      await handleTemplateHydratedNotification(msg);
-      break;
-    case 'task_routed':
-      await handleTaskRoutedNotification(msg);
-      break;
-    case 'node_state_change':
-      await handleNodeStateChangeNotification(msg);
-      break;
     default:
-      logger.warn(logCtx({ channel: msg.channel }), '⚠️ Unknown notification channel in FIXED architecture');
+      logger.debug(logCtx({ channel: msg.channel }), '📝 Generic notification logged');
+      broadcast({
+        v: 1,
+        taskId: 'system',
+        nodeId: 'notification',
+        state: 'notification_received',
+        title: `${msg.channel} notification`,
+        architecture: 'fixed_clean_separation',
+        timestamp: new Date().toISOString()
+      });
   }
 }
 
-// Standard rail event handler (enhanced)
+// Standard rail event handler
 async function handleStandardRailEvent(msg: Notification): Promise<void> {
   if (msg.channel !== CHANNEL || !msg.payload) return;
 
   logger.debug(logCtx({ channel: msg.channel }), '🚂 Processing standard rail event');
 
-  /* Parse JSON with enhanced error handling */
   let raw: any;
   try {
     raw = JSON.parse(msg.payload);
 
-    /* Enhanced normalization */
+    // Normalize field names
     if (raw.taskId && !raw.task_id) raw.task_id = raw.taskId;
     if (raw.nodeId && !raw.node_id) raw.node_id = raw.nodeId;
     if (raw.eventSubtype && !raw.event_subtype) raw.event_subtype = raw.eventSubtype;
 
-    /* Enhanced key trimming */
-    for (const k of Object.keys(raw)) {
-      const trimmed = k.trim();
-      if (trimmed !== k && raw[trimmed] === undefined) {
-        raw[trimmed] = raw[k];
-        delete raw[k];
-      }
-    }
   } catch (err) {
     logger.error(logCtx({ 
       error: err instanceof Error ? err.message : String(err), 
@@ -419,16 +376,11 @@ async function handleStandardRailEvent(msg: Notification): Promise<void> {
     return;
   }
 
-  /* Enhanced shape validation */
+  // Validate shape
   if (typeof raw !== 'object' || !raw.task_id || !raw.node_id || !raw.state) {
     logger.warn(logCtx({ 
       payload: msg.payload, 
       normalised: raw,
-      missing_fields: {
-        task_id: !raw.task_id,
-        node_id: !raw.node_id,
-        state: !raw.state
-      }
     }), '⚠️ Payload does not conform to RailEvent shape');
     return;
   }
@@ -445,7 +397,7 @@ async function handleStandardRailEvent(msg: Notification): Promise<void> {
     event_subtype: curr.event_subtype
   }), '📊 Rail event processed - generating delta');
 
-  /* Enhanced NATS publishing with error handling */
+  // NATS publishing for WAITING_AI
   if (delta.state === 'WAITING_AI') {
     try {
       const { rows: [node] } = await query(
@@ -483,7 +435,7 @@ async function handleStandardRailEvent(msg: Notification): Promise<void> {
     }
   }
 
-  // Enhanced WebSocket broadcast
+  // WebSocket broadcast
   broadcast({
     ...delta,
     architecture: 'fixed_clean_separation',
@@ -491,7 +443,7 @@ async function handleStandardRailEvent(msg: Notification): Promise<void> {
     source: 'rail_events_listener_fixed'
   });
 
-  /* Enhanced NATS publishing for node completion */
+  // NATS publishing for node completion
   if (curr.state === 'DONE') {
     try {
       const nc = await getNatsConnection();
@@ -513,11 +465,9 @@ async function handleStandardRailEvent(msg: Notification): Promise<void> {
 
   lastEventByNode.set(key, curr);
 
-  // Enhanced Temporal workflow handling
+  // Temporal workflow handling (if enabled)
   const statusForTemporal = curr.state;
   if (!['DONE', 'FAILED'].includes(statusForTemporal)) {
-    logger.debug(logCtx({ task_id: curr.task_id, status: statusForTemporal }), 
-                'Skipping Temporal signal for non-terminal status');
     return;
   }
 
@@ -558,7 +508,7 @@ async function handleStandardRailEvent(msg: Notification): Promise<void> {
   }
 }
 
-// New notification handlers (enhanced)
+// New notification handlers
 async function handleIntelligenceNotification(msg: Notification): Promise<void> {
   try {
     const payload = JSON.parse(msg.payload!);
@@ -672,13 +622,11 @@ async function handleDAGCreationNotification(msg: Notification): Promise<void> {
   }
 }
 
-// Additional notification handlers
 async function handleNatsBridgeNotification(msg: Notification): Promise<void> {
   try {
     const payload = JSON.parse(msg.payload!);
     logger.debug(logCtx({ payload }), '🌉 NATS bridge notification received');
     
-    // Forward to appropriate NATS subject if needed
     if (payload.subject && payload.payload) {
       const nc = await getNatsConnection();
       nc.publish(payload.subject, sc.encode(JSON.stringify(payload.payload)));
@@ -691,134 +639,16 @@ async function handleNatsBridgeNotification(msg: Notification): Promise<void> {
   }
 }
 
-async function handleWorkerStatusNotification(msg: Notification): Promise<void> {
-  try {
-    const payload = JSON.parse(msg.payload!);
-    logger.info(logCtx({ payload }), '👷 Worker status notification received');
-    
-    broadcast({
-      v: 1,
-      taskId: payload.task_id || 'system',
-      nodeId: 'worker_status',
-      state: payload.status || 'unknown',
-      title: `Worker ${payload.worker_type || 'unknown'} Status: ${payload.status || 'unknown'}`,
-      architecture: 'fixed_clean_separation',
-      workflow_stage: 'worker_status',
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    logger.error(logCtx({ error }), '❌ Error handling worker status notification');
-    listenerErrors.inc({ instance_id: INSTANCE_ID, error_type: 'worker_status_notification' });
-  }
-}
-
-async function handleTemplateHydratedNotification(msg: Notification): Promise<void> {
-  try {
-    const payload = JSON.parse(msg.payload!);
-    const taskId = payload.task_id;
-    
-    logger.info(logCtx({ taskId }), '🏗️ Template hydrated notification received');
-    
-    broadcast({
-      v: 1,
-      taskId,
-      nodeId: 'template_hydration',
-      state: 'template_hydrated',
-      title: 'Template Hydrated',
-      architecture: 'fixed_clean_separation',
-      workflow_stage: 'template_hydration',
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    logger.error(logCtx({ error }), '❌ Error handling template hydrated notification');
-    listenerErrors.inc({ instance_id: INSTANCE_ID, error_type: 'template_hydrated_notification' });
-  }
-}
-
-async function handleTaskRoutedNotification(msg: Notification): Promise<void> {
-  try {
-    const payload = JSON.parse(msg.payload!);
-    const taskId = payload.task_id;
-    
-    logger.info(logCtx({ taskId }), '🎯 Task routed notification received');
-    
-    broadcast({
-      v: 1,
-      taskId,
-      nodeId: 'task_routing',
-      state: 'task_routed',
-      title: 'Task Routed',
-      architecture: 'fixed_clean_separation',
-      workflow_stage: 'task_routing',
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    logger.error(logCtx({ error }), '❌ Error handling task routed notification');
-    listenerErrors.inc({ instance_id: INSTANCE_ID, error_type: 'task_routed_notification' });
-  }
-}
-
-async function handleNodeStateChangeNotification(msg: Notification): Promise<void> {
-  try {
-    const payload = JSON.parse(msg.payload!);
-    logger.debug(logCtx({ payload }), '🔄 Node state change notification received');
-    
-    // This might be a direct alternative to rail_event, so process similarly
-    if (payload.task_id && payload.node_id && payload.state) {
-      const railEvent: RailEvent = {
-        task_id: payload.task_id,
-        node_id: payload.node_id,
-        state: payload.state,
-        event_subtype: payload.event_subtype || null,
-        generated_title: payload.title || payload.generated_title
-      };
-      
-      const key = `${railEvent.task_id}:${railEvent.node_id}`;
-      const prev = lastEventByNode.get(key) ?? null;
-      const delta: BroadcastDelta = toDelta(railEvent, prev);
-      
-      broadcast({
-        ...delta,
-        architecture: 'fixed_clean_separation',
-        timestamp: new Date().toISOString(),
-        source: 'node_state_change'
-      });
-      
-      lastEventByNode.set(key, railEvent);
-      
-      logger.debug(logCtx({ 
-        task_id: railEvent.task_id, 
-        node_id: railEvent.node_id, 
-        state: railEvent.state 
-      }), '✅ Node state change processed as rail event');
-    }
-    
-  } catch (error) {
-    logger.error(logCtx({ error }), '❌ Error handling node state change notification');
-    listenerErrors.inc({ instance_id: INSTANCE_ID, error_type: 'node_state_change_notification' });
-  }
-}
-
-// 🔧 FIXED: Enhanced graceful shutdown
+// Graceful shutdown
 async function shutdownFixedArchitecture(reason?: string) {
   logger.info(logCtx({ reason }), '🛑 FIXED architecture graceful shutdown initiated');
   isShuttingDown = true;
 
-  // Clear all intervals
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
-  
-  if (connectionCheckInterval) {
-    clearInterval(connectionCheckInterval);
-    connectionCheckInterval = null;
-  }
 
-  // Close connections in order
   try {
     await new Promise<void>(resolve => closeWebSocketServer(resolve));
     logger.info(logCtx(), '✅ WebSocket server closed');
@@ -860,17 +690,10 @@ async function shutdownFixedArchitecture(reason?: string) {
     }
   }
 
-  logger.info(logCtx({
-    final_metrics: {
-      notifications_received: notificationsReceived.get(),
-      notifications_processed: notificationsProcessed.get(),
-      listener_errors: listenerErrors.get(),
-      connection_events: connectionEvents.get()
-    }
-  }), '📊 FIXED architecture shutdown complete with final metrics');
+  logger.info(logCtx(), '📊 FIXED architecture shutdown complete');
 }
 
-// Enhanced process signal handling
+// Process signal handling
 process.on('SIGINT', () => shutdownFixedArchitecture('SIGINT').then(() => process.exit(0)));
 process.on('SIGTERM', () => shutdownFixedArchitecture('SIGTERM').then(() => process.exit(0)));
 process.on('unhandledRejection', (reason, promise) => {
@@ -881,7 +704,7 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
-// 🔧 FIXED: Enhanced bootstrap with better error handling
+// Bootstrap
 import pRetry from 'p-retry';
 
 (async () => {
@@ -906,7 +729,7 @@ import pRetry from 'p-retry';
   }), `📡 Will subscribe to FIXED channels`);
 
   try {
-    // Bootstrap components in order with retries
+    // Bootstrap components
     await pRetry(bootFixedListener, { 
       retries: 5, 
       minTimeout: 1_000, 
@@ -927,24 +750,17 @@ import pRetry from 'p-retry';
     initializeWebSocketServer(logger);
     logger.info(logCtx(), '✅ FIXED WebSocket server ready');
     
-    // Start connection monitoring
-    startConnectionMonitoring();
-    logger.info(logCtx(), '✅ FIXED Connection monitoring started');
-    
     logger.info(logCtx({
       architecture: 'fixed_clean_separation',
       components: ['routing_worker', 'segmentation_engine', 'template_hydrator'],
       workflow: 'intelligence → segmentation → dag_creation',
-      features: ['conditional_logic', 'business_intelligence', 'human_logical_nodes', 'robust_connections'],
-      channels_monitored: channels.length,
-      connection_monitoring: true,
-      enhanced_error_handling: true
-    }), '🎉 FIXED clean architecture application started successfully and is ready to receive ALL notifications!');
+      ssl_bypass: true,
+      channels_monitored: channels.length
+    }), '🎉 FIXED clean architecture application started successfully!');
     
   } catch (err) {
     logger.fatal(logCtx({ 
       error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined
     }), '💥 Failed to start FIXED listener - exiting');
     await shutdownFixedArchitecture('startup failure');
     process.exit(1);
