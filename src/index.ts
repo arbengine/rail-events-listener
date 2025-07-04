@@ -217,6 +217,11 @@ export async function bootFixedListener(): Promise<void> {
       'task_routed',                        // Task routing notifications
       'node_state_change',                  // Direct node state changes
       'dynamic_node_spawned',               // Dynamic node spawning notifications
+      
+      // 🆕 ADD PATTERN-SPECIFIC CHANNELS
+      'recurring_task_scheduled',           // 🔄 Recurring workflow events
+      'continuous_monitor_trigger',         // 🌊 Continuous workflow triggers
+      'dynamic_branch_spawn',               // 🔀 Branching workflow spawns
     ];
     
     for (const channel of channels) {
@@ -343,6 +348,20 @@ async function handleFixedNotification(msg: Notification): Promise<void> {
     case 'dynamic_node_spawned':
       await handleDynamicNodeSpawnNotification(msg);
       break;
+      
+    // 🆕 ADD PATTERN-SPECIFIC CHANNELS
+    case 'recurring_task_scheduled':
+      await handleRecurringTaskNotification(msg);
+      break;
+      
+    case 'continuous_monitor_trigger':
+      await handleContinuousMonitorNotification(msg);
+      break;
+      
+    case 'dynamic_branch_spawn':
+      await handleDynamicBranchNotification(msg);
+      break;
+      
     default:
       logger.debug(logCtx({ channel: msg.channel }), '📝 Generic notification logged');
       broadcast({
@@ -400,6 +419,84 @@ async function handleStandardRailEvent(msg: Notification): Promise<void> {
     state: curr.state,
     event_subtype: curr.event_subtype
   }), '📊 Rail event processed - generating delta');
+
+  // 🆕 ADD PATTERN-AWARE HANDLING
+  // 🎯 NORTH STAR: Special handling for pattern-specific nodes
+  try {
+    // Check if this is a pattern-specific node completion
+    const { rows: [nodeData] } = await query(
+      `SELECT metadata, spawn_conditions, generation_strategy
+       FROM execution_nodes 
+       WHERE node_id = $1`,
+      [curr.node_id]
+    );
+    
+    if (nodeData) {
+      // 🔄 RECURRING: Scheduler node completion triggers next instance
+      if (nodeData.metadata?.is_scheduler_node && curr.state === 'DONE') {
+        console.log(`🔄 Scheduler node completed, triggering next ${nodeData.metadata.recurrence_pattern} instance`);
+        
+        // Create next task instance
+        await query(`
+          INSERT INTO tasks (task_id, subject, body, client_email, status, parent_task_id, instance_number, workflow_patterns)
+          SELECT 
+            'task_' || EXTRACT(EPOCH FROM NOW())::bigint || '_' || substr(md5(random()::text), 1, 8),
+            subject,
+            body,
+            client_email,
+            'pending',
+            task_id, -- parent reference
+            COALESCE((SELECT MAX(instance_number) FROM tasks WHERE parent_task_id = $1), 0) + 1,
+            workflow_patterns
+          FROM tasks WHERE task_id = $1
+          RETURNING task_id
+        `, [curr.task_id]);
+        
+        broadcast({
+          ...delta,
+          eventType: 'recurring_instance_scheduled',
+          metadata: {
+            pattern: nodeData.metadata.recurrence_pattern,
+            parent_task: curr.task_id
+          }
+        });
+      }
+      
+      // 🌊 CONTINUOUS: Monitor node events
+      if (nodeData.metadata?.is_monitor_node && curr.state === 'RUNNING') {
+        console.log(`🌊 Monitor node active, watching for triggers`);
+        
+        // Monitor nodes stay in RUNNING state
+        broadcast({
+          ...delta,
+          eventType: 'monitor_active',
+          metadata: {
+            monitor_type: nodeData.metadata.monitor_type
+          }
+        });
+      }
+      
+      // 🔀 BRANCHING: Dynamic spawn on conditions
+      if (nodeData.generation_strategy === 'dynamic' && nodeData.can_spawn_children && curr.state === 'DONE') {
+        console.log(`🔀 Dynamic node completed, checking spawn conditions`);
+        
+        // Notify DAG runner about potential spawning
+        const nc = await getNatsConnection();
+        await nc.publish(
+          `busywork.node.spawn_check.${curr.node_id}`,
+          sc.encode(JSON.stringify({
+            taskId: curr.task_id,
+            nodeId: curr.node_id,
+            spawn_conditions: nodeData.spawn_conditions,
+            node_output: curr.output_json || {}
+          }))
+        );
+      }
+    }
+  } catch (error) {
+    console.error(`⚠️ Error checking pattern-specific handling:`, error);
+    // Continue with normal processing even if pattern check fails
+  }
 
   // NATS publishing for WAITING_AI
   if (delta.state === 'WAITING_AI') {
@@ -678,6 +775,107 @@ async function handleDynamicNodeSpawnNotification(msg: Notification): Promise<vo
     
   } catch (error) {
     logger.error(logCtx({ error }), '❌ Error handling dynamic spawn notification');
+  }
+}
+
+// 🆕 ADD NEW NOTIFICATION HANDLER
+async function handleRecurringTaskNotification(msg: Notification): Promise<void> {
+  try {
+    const payload = JSON.parse(msg.payload!);
+    const { parent_task_id, next_instance_time, pattern } = payload;
+    
+    console.log(`🔄 Recurring task notification: ${pattern} for parent ${parent_task_id}`);
+    
+    broadcast({
+      v: 1,
+      taskId: parent_task_id,
+      nodeId: 'scheduler',
+      state: 'scheduled',
+      title: `Next ${pattern} instance scheduled`,
+      architecture: 'recurring_workflow',
+      workflow_stage: 'scheduling',
+      metadata: {
+        next_run: next_instance_time,
+        pattern: pattern
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+    notificationsProcessed.inc({ 
+      status: 'recurring_scheduled', 
+      instance_id: INSTANCE_ID,
+      workflow_stage: 'recurring'
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error handling recurring task notification:`, error);
+  }
+}
+
+async function handleContinuousMonitorNotification(msg: Notification): Promise<void> {
+  try {
+    const payload = JSON.parse(msg.payload!);
+    const { task_id, node_id, monitor_type, trigger_data } = payload;
+    
+    console.log(`🌊 Continuous monitor triggered: ${monitor_type} for node ${node_id}`);
+    
+    broadcast({
+      v: 1,
+      taskId: task_id,
+      nodeId: node_id,
+      state: 'monitor_triggered',
+      title: `${monitor_type} monitor triggered`,
+      architecture: 'continuous_workflow',
+      workflow_stage: 'monitoring',
+      metadata: {
+        monitor_type: monitor_type,
+        trigger_data: trigger_data
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+    notificationsProcessed.inc({ 
+      status: 'monitor_triggered', 
+      instance_id: INSTANCE_ID,
+      workflow_stage: 'continuous'
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error handling continuous monitor notification:`, error);
+  }
+}
+
+async function handleDynamicBranchNotification(msg: Notification): Promise<void> {
+  try {
+    const payload = JSON.parse(msg.payload!);
+    const { task_id, parent_node_id, spawned_nodes, branch_condition } = payload;
+    
+    console.log(`🔀 Dynamic branch spawned: ${spawned_nodes?.length || 0} nodes from ${parent_node_id}`);
+    
+    broadcast({
+      v: 1,
+      taskId: task_id,
+      nodeId: parent_node_id,
+      state: 'branch_spawned',
+      title: `Dynamic branch created (${spawned_nodes?.length || 0} nodes)`,
+      architecture: 'branching_workflow',
+      workflow_stage: 'branching',
+      metadata: {
+        spawned_count: spawned_nodes?.length || 0,
+        branch_condition: branch_condition,
+        spawned_node_ids: spawned_nodes
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+    notificationsProcessed.inc({ 
+      status: 'branch_spawned', 
+      instance_id: INSTANCE_ID,
+      workflow_stage: 'branching'
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error handling dynamic branch notification:`, error);
   }
 }
 
